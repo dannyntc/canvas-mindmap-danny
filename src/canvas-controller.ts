@@ -5,7 +5,7 @@ import {
 	CanvasNodeLike,
 	CanvasViewport,
 } from "./canvas-adapter";
-import { applyCanvasColors, branchColorTargets, colorControlTargets } from "./color-actions";
+import { applyCanvasColors, branchColorTargets } from "./color-actions";
 import { PASTEL_COLORS } from "./colors";
 import { HeightController } from "./height-controller";
 import {
@@ -528,24 +528,14 @@ export class CanvasController {
 		this.removeControls();
 		if (!this.state.enabled) return;
 		const hidden = hiddenNodeIds(this.state);
-		const data = this.adapter.getData();
-		const dataById = new Map(data.nodes.map((node) => [node.id, node]));
+		const dataById = new Map(this.adapter.getData().nodes.map((node) => [node.id, node]));
 		const doc = this.view.containerEl.ownerDocument;
 		for (const node of this.adapter.nodes()) {
 			if (hidden.has(node.id) || !node.nodeEl || dataById.get(node.id)?.type === "group") continue;
 			const controls = doc.createElement("div");
 			controls.className = "canvas-mindmap-controls";
 			controls.setAttribute("role", "group");
-			const root = rootOf(this.state, node.id);
-			const layout = this.state.trees[root]?.layout ?? this.state.defaultLayout;
-			if (node.id === root && layout === "balanced") {
-				controls.append(
-					this.controlButton("Create left child", "←", () => this.createChild(node.id, "left")),
-					this.controlButton("Create right child", "→", () => this.createChild(node.id, "right")),
-				);
-			} else {
-				controls.append(this.controlButton("Create child", "+", () => this.createChild(node.id)));
-			}
+			controls.append(this.controlButton("Create child", "+", () => this.createChild(node.id)));
 			const childCount = relationChildren(this.state, node.id).length;
 			if (childCount > 0 && this.state.collapsedNodeIds.includes(node.id)) {
 				const count = hiddenDescendantCount(this.state, node.id);
@@ -556,29 +546,6 @@ export class CanvasController {
 				);
 			} else if (childCount > 0) {
 				controls.append(this.controlButton("Collapse descendants", "−", () => this.toggleCollapse(node.id)));
-			}
-			const directColorTargets = colorControlTargets(this.state, data, node.id);
-			controls.append(this.controlButton(
-				"Node colour",
-				"",
-				() => this.showColorPalette(node.id, {
-					label: "Node colour",
-					nodeIds: directColorTargets.nodeIds,
-					edgeIds: new Set(),
-				}, controls),
-				"palette",
-			));
-			if (directColorTargets.incomingEdgeIds.size > 0) {
-				controls.append(this.controlButton(
-					"Incoming arrow colour",
-					"",
-					() => this.showColorPalette(node.id, {
-						label: "Incoming arrow colour",
-						nodeIds: new Set(),
-						edgeIds: directColorTargets.incomingEdgeIds,
-					}, controls),
-					"palette",
-				));
 			}
 			node.nodeEl.append(controls);
 		}

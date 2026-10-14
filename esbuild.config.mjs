@@ -15,7 +15,7 @@ const options = {
   minify: production,
   legalComments: "eof",
   banner: {
-    js: "/*! Canvas-Mindmap-Danny 1.1.6 — Copyright (c) Danny; original work by Boninall — MIT License */",
+    js: "/*! Canvas-Mindmap-Danny 1.1.7 — Copyright (c) Danny; original work by Boninall — MIT License */",
   },
 };
 

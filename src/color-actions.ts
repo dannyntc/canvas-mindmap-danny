@@ -6,31 +6,9 @@ export interface CanvasColorTargets {
 	edgeIds?: ReadonlySet<EdgeId> | readonly EdgeId[];
 }
 
-export interface ColorControlTargets {
-	nodeIds: Set<NodeId>;
-	incomingEdgeIds: Set<EdgeId>;
-}
-
 function asSet(values: ReadonlySet<string> | readonly string[] | undefined): ReadonlySet<string> {
 	if (!values) return new Set();
 	return values instanceof Set ? values : new Set(values);
-}
-
-/** Resolve the direct colour actions shown beside one Canvas card. */
-export function colorControlTargets(
-	state: CanvasMindMapState,
-	data: CanvasData,
-	nodeId: NodeId,
-): ColorControlTargets {
-	const nodeIds = new Set<NodeId>();
-	if (data.nodes.some((node) => node.id === nodeId)) nodeIds.add(nodeId);
-
-	const incomingEdgeIds = new Set<EdgeId>();
-	const relation = state.relations[nodeId];
-	if (relation && data.edges.some((edge) => edge.id === relation.edgeId)) {
-		incomingEdgeIds.add(relation.edgeId);
-	}
-	return { nodeIds, incomingEdgeIds };
 }
 
 /** Resolve a branch to its cards and managed tree connectors only. */
