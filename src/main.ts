@@ -67,7 +67,7 @@ const DEFAULT_LEGACY_SETTINGS: LegacySettings = {
 	advanced: {
 		transferToCommands: false,
 		showChangelogAutomatically: true,
-		lastUpdatedVersion: "1.1.11",
+		lastUpdatedVersion: "1.1.12",
 	},
 };
 
@@ -288,12 +288,12 @@ export default class CanvasMindMapPlugin extends Plugin {
 		this.addCommand({
 			id: "open-changelog",
 			name: "Open Canvas Mindmap changelog",
-			callback: () => new Notice("Canvas Mindmap 1.1.11 makes pastel colours visible in the native Canvas picker; hover card controls remain disabled."),
+			callback: () => new Notice("Canvas Mindmap 1.1.12 clears the previous selection when another card or empty Canvas space is clicked."),
 		});
 	}
 
 	async saveSettings(): Promise<void> {
-		this.settings.advanced.lastUpdatedVersion = "1.1.11";
+		this.settings.advanced.lastUpdatedVersion = "1.1.12";
 		const current = this.store.snapshot();
 		await this.saveData({ ...this.settings, ...current });
 	}

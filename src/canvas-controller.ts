@@ -1426,6 +1426,12 @@ export class CanvasController {
 
 		const nodeId = this.nodeIdFromElement(event.target);
 		if (!nodeId) {
+			if (!event.shiftKey && this.isCanvasBackground(event.target)) {
+				// Native Canvas normally clears selection on a background click. The
+				// plugin claims this gesture for panning, so keep that selection
+				// transition explicit before the native handler is bypassed.
+				this.adapter.clearSelection();
+			}
 			if (!event.shiftKey && this.isCanvasBackground(event.target) && this.beginPan(event)) {
 				// Claim the background gesture before native Canvas starts its
 				// rectangle-selection tracker.
@@ -1435,6 +1441,8 @@ export class CanvasController {
 			}
 			return;
 		}
+		const selectedBeforePress = this.adapter.selectionIds();
+		if (!event.shiftKey && !selectedBeforePress.includes(nodeId)) this.adapter.selectOnly(nodeId);
 		if (this.adapter.capabilities.readOnly) return;
 		if (event.target.closest(".canvas-node-resizer, .canvas-node-resize, [data-resize-handle]")) {
 			if (!this.state.manualHeightNodeIds.includes(nodeId)) {

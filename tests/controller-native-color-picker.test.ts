@@ -146,3 +146,103 @@ test("controller preserves native picker input and applies a pastel colour to th
 
 	controller.dispose();
 });
+
+test("ordinary card clicks replace selection and empty-space clicks clear it", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	window.document.body.append(wrapper);
+
+	const firstElement = window.document.createElement("div");
+	firstElement.className = "canvas-node";
+	const secondElement = window.document.createElement("div");
+	secondElement.className = "canvas-node";
+	wrapper.append(firstElement, secondElement);
+	const first = { id: "first", x: 0, y: 0, width: 100, height: 60, type: "text", nodeEl: firstElement };
+	const second = { id: "second", x: 200, y: 0, width: 100, height: 60, type: "text", nodeEl: secondElement };
+	const selection = new Set<any>([first]);
+	const data: any = {
+		nodes: [
+			{ id: first.id, x: first.x, y: first.y, width: first.width, height: first.height, type: first.type },
+			{ id: second.id, x: second.x, y: second.y, width: second.width, height: second.height, type: second.type },
+		],
+		edges: [],
+	};
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: new Map([[first.id, first], [second.id, second]]),
+		selection,
+		getData: () => data,
+		importData: () => undefined,
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		deselectAll: () => selection.clear(),
+		selectOnly: (node: any) => {
+			selection.clear();
+			selection.add(node);
+		},
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: false,
+			autoHeight: false,
+			defaultLayout: "balanced" as const,
+			trees: {},
+			relations: {},
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+	});
+	controller.mount();
+
+	secondElement.dispatchEvent(new window.PointerEvent("pointerdown", {
+		bubbles: true,
+		cancelable: true,
+		isPrimary: true,
+		pointerType: "mouse",
+		button: 0,
+		pointerId: 2,
+	}));
+	assert.deepEqual([...selection].map((node) => node.id), ["second"]);
+
+	firstElement.dispatchEvent(new window.PointerEvent("pointerdown", {
+		bubbles: true,
+		cancelable: true,
+		isPrimary: true,
+		pointerType: "mouse",
+		button: 0,
+		pointerId: 3,
+	}));
+	assert.deepEqual([...selection].map((node) => node.id), ["first"]);
+
+	secondElement.dispatchEvent(new window.PointerEvent("pointerdown", {
+		bubbles: true,
+		cancelable: true,
+		isPrimary: true,
+		pointerType: "mouse",
+		button: 0,
+		pointerId: 5,
+		shiftKey: true,
+	}));
+	assert.deepEqual([...selection].map((node) => node.id), ["first"]);
+
+	wrapper.dispatchEvent(new window.PointerEvent("pointerdown", {
+		bubbles: true,
+		cancelable: true,
+		isPrimary: true,
+		pointerType: "mouse",
+		button: 0,
+		pointerId: 4,
+	}));
+	assert.equal(selection.size, 0);
+
+	controller.dispose();
+});
