@@ -28,7 +28,7 @@ Existing directed connections are adopted only when they form an unambiguous acy
 - `Tab` creates a child; `Enter` creates a sibling for a non-root card.
 - `Space` starts editing; native Markdown editor keys remain native while editing.
 - Clicking outside an editing card exits editing immediately and returns focus to Canvas navigation.
-- Arrow keys select the nearest visible card.
+- Arrow keys select the nearest visible card; Shift+ArrowUp/Down are intentionally ignored so they do not shift cards.
 - `Delete`/`Backspace` deletes the selected branch, including collapsed descendants.
 - The native Canvas zoom-in and zoom-out controls are hidden; mouse-wheel and trackpad zoom remain available.
 - The Canvas sidebar includes an `Arrange mind map` button. With cards selected it arranges their trees; with no card selected it arranges all trees.

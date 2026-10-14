@@ -67,7 +67,7 @@ const DEFAULT_LEGACY_SETTINGS: LegacySettings = {
 	advanced: {
 		transferToCommands: false,
 		showChangelogAutomatically: true,
-	lastUpdatedVersion: "1.1.16",
+	lastUpdatedVersion: "1.1.17",
 	},
 };
 
@@ -288,12 +288,12 @@ export default class CanvasMindMapPlugin extends Plugin {
 		this.addCommand({
 			id: "open-changelog",
 			name: "Open Canvas Mindmap changelog",
-			callback: () => new Notice("Canvas Mindmap 1.1.16 keeps a wider 48px clearance while cards move aside during dragging and node creation."),
+			callback: () => new Notice("Canvas Mindmap 1.1.17 ignores Shift+ArrowUp/Down so selected cards do not shift."),
 		});
 	}
 
 	async saveSettings(): Promise<void> {
-		this.settings.advanced.lastUpdatedVersion = "1.1.16";
+		this.settings.advanced.lastUpdatedVersion = "1.1.17";
 		const current = this.store.snapshot();
 		await this.saveData({ ...this.settings, ...current });
 	}

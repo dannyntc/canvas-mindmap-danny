@@ -247,6 +247,85 @@ test("ordinary card clicks replace selection and empty-space clicks clear it", a
 	controller.dispose();
 });
 
+test("Shift+ArrowUp/Down do nothing while ordinary arrows select the nearest card", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	window.document.body.append(wrapper);
+	const firstElement = window.document.createElement("div");
+	firstElement.className = "canvas-node";
+	const secondElement = window.document.createElement("div");
+	secondElement.className = "canvas-node";
+	wrapper.append(firstElement, secondElement);
+	const first: any = { id: "first", x: 0, y: 0, width: 100, height: 60, type: "text", nodeEl: firstElement };
+	const second: any = { id: "second", x: 0, y: 200, width: 100, height: 60, type: "text", nodeEl: secondElement };
+	const selection = new Set<any>([first]);
+	const data: any = {
+		nodes: [
+			{ id: first.id, x: first.x, y: first.y, width: first.width, height: first.height, type: first.type },
+			{ id: second.id, x: second.x, y: second.y, width: second.width, height: second.height, type: second.type },
+		],
+		edges: [],
+	};
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: new Map([[first.id, first], [second.id, second]]),
+		selection,
+		getData: () => data,
+		importData: () => undefined,
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		deselectAll: () => selection.clear(),
+		selectOnly: (node: any) => {
+			selection.clear();
+			selection.add(node);
+		},
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: false,
+			autoHeight: false,
+			defaultLayout: "balanced" as const,
+			trees: {},
+			relations: {},
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+	});
+	controller.mount();
+
+	for (const key of ["ArrowUp", "ArrowDown"]) {
+		const event = new window.KeyboardEvent("keydown", {
+			bubbles: true,
+			cancelable: true,
+			key,
+			shiftKey: true,
+		});
+		wrapper.dispatchEvent(event);
+		assert.equal(event.defaultPrevented, true);
+		assert.deepEqual([...selection].map((node) => node.id), ["first"]);
+		assert.deepEqual({ x: first.x, y: first.y }, { x: 0, y: 0 });
+	}
+
+	const ordinaryArrow = new window.KeyboardEvent("keydown", {
+		bubbles: true,
+		cancelable: true,
+		key: "ArrowDown",
+	});
+	wrapper.dispatchEvent(ordinaryArrow);
+	assert.equal(ordinaryArrow.defaultPrevented, true);
+	assert.deepEqual([...selection].map((node) => node.id), ["second"]);
+	controller.dispose();
+});
+
 test("dragging a card makes nearby cards move aside and return when the path clears", async () => {
 	const { Controller, window } = await loadController();
 	const wrapper = window.document.createElement("div");

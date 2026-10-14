@@ -670,6 +670,11 @@ export class CanvasController {
 		}
 		const selected = this.adapter.selectionIds().filter((id) => !!this.adapter.node(id));
 		if (selected.length === 0) return;
+		if (event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+			event.preventDefault();
+			event.stopPropagation();
+			return;
+		}
 		const nodeId = selected[0];
 		const node = this.adapter.node(nodeId);
 		if (node?.isEditing) return;
