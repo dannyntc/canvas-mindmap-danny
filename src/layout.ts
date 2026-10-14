@@ -25,6 +25,28 @@ export interface LayoutOptions {
 	rootIds?: NodeId[];
 }
 
+/**
+ * Resolve the tree roots represented by a Canvas selection. Connector IDs and
+ * stale selection entries are ignored; an empty result means "all trees".
+ */
+export function layoutRootsForSelection(
+	selectedIds: readonly NodeId[],
+	data: CanvasData,
+	state: CanvasMindMapState,
+): NodeId[] {
+	const nodeIds = new Set(data.nodes.map((node) => node.id));
+	const rootsInSelection: NodeId[] = [];
+	const seen = new Set<NodeId>();
+	for (const selectedId of selectedIds) {
+		if (!nodeIds.has(selectedId)) continue;
+		const rootId = rootOf(state, selectedId);
+		if (seen.has(rootId)) continue;
+		seen.add(rootId);
+		rootsInSelection.push(rootId);
+	}
+	return rootsInSelection;
+}
+
 interface Size {
 	width: number;
 	height: number;

@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assignMissingBalancedSides, calculateLayout, chooseStraightConnectorSides } from "../src/layout";
+import {
+	assignMissingBalancedSides,
+	calculateLayout,
+	chooseStraightConnectorSides,
+	layoutRootsForSelection,
+} from "../src/layout";
 import { attachChild } from "../src/tree-model";
 import { CanvasData, defaultCanvasState } from "../src/types";
 
@@ -78,6 +83,18 @@ test("independent trees are laid out without moving an unselected root", () => {
 	const result = calculateLayout(canvas, map, { rootIds: ["root"], horizontalGap: 20, verticalGap: 15 });
 	assert.deepEqual(result.positions.other, { x: 900, y: 900 });
 	assert.deepEqual(result.positions.root, { x: 100, y: 100 });
+});
+
+test("arrange selection resolves unique card roots and ignores connectors", () => {
+	const canvas = data();
+	canvas.nodes.push(node("other", 900, 900));
+	const map = state();
+
+	assert.deepEqual(
+		layoutRootsForSelection(["grand", "wide", "e-grand", "other"], canvas, map),
+		["root", "other"],
+	);
+	assert.deepEqual(layoutRootsForSelection([], canvas, map), []);
 });
 
 test("straight connector sides follow final card geometry", () => {

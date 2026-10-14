@@ -79,6 +79,23 @@
     display: none !important;
 }
 
+.canvas-mindmap-arrange-control {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: inline-flex;
+    justify-content: center;
+    padding: 0;
+}
+
+.canvas-mindmap-arrange-control:hover,
+.canvas-mindmap-arrange-control:focus-visible {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
 .canvas-mindmap-panning {
     cursor: grabbing !important;
 }

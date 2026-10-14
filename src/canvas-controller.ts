@@ -1,4 +1,4 @@
-import { Menu, Notice, setTooltip } from "obsidian";
+import { Menu, Notice, setIcon, setTooltip } from "obsidian";
 import {
 	CanvasAdapter,
 	CanvasLike,
@@ -13,7 +13,12 @@ import {
 	panViewport,
 	Rect,
 } from "./interaction";
-import { assignMissingBalancedSides, calculateLayout, chooseStraightConnectorSides } from "./layout";
+import {
+	assignMissingBalancedSides,
+	calculateLayout,
+	chooseStraightConnectorSides,
+	layoutRootsForSelection,
+} from "./layout";
 import {
 	CanvasData,
 	CanvasEdgeData,
@@ -143,6 +148,7 @@ export class CanvasController {
 	private pan?: PanSnapshot;
 	private panNoticeShown = false;
 	private readonly zoomControlStates = new WeakMap<HTMLElement, { ariaHidden: string | null; tabIndex: string | null }>();
+	private arrangeControl?: HTMLButtonElement;
 	private readonly historyStates = new Map<string, CanvasMindMapState>();
 	private readonly height: HeightController;
 	private removeNativeDragHook?: () => void;
@@ -332,8 +338,9 @@ export class CanvasController {
 	private updateZoomControls(): void {
 		const controlRoot = this.view.containerEl;
 		controlRoot.classList.toggle("canvas-mindmap-mode-active", this.state.enabled && !this.disposed);
-		if (!this.state.enabled || this.disposed) {
+		if (!this.state.enabled || this.disposed || this.adapter.capabilities.readOnly) {
 			this.restoreZoomControls(controlRoot);
+			this.removeArrangeControl();
 			return;
 		}
 		for (const control of Array.from(controlRoot.querySelectorAll<HTMLElement>(
@@ -341,6 +348,46 @@ export class CanvasController {
 		))) {
 			if (this.isZoomInOrOutControl(control)) this.hideZoomControl(control);
 		}
+		this.ensureArrangeControl();
+	}
+
+	private ensureArrangeControl(): void {
+		const controls = this.view.containerEl.querySelector<HTMLElement>(".canvas-controls");
+		if (!controls) {
+			this.removeArrangeControl();
+			return;
+		}
+		const existing = controls.querySelector<HTMLButtonElement>(
+			"[data-canvas-mindmap-action='arrange']",
+		);
+		if (existing) {
+			this.arrangeControl = existing;
+			return;
+		}
+		this.removeArrangeControl();
+		const button = this.view.containerEl.ownerDocument.createElement("button");
+		button.type = "button";
+		button.className = "canvas-control-item canvas-mindmap-arrange-control clickable-icon";
+		button.dataset.canvasMindmapAction = "arrange";
+		button.setAttribute("aria-label", "Arrange mind map");
+		setTooltip(button, "Arrange mind map");
+		setIcon(button, "layout-dashboard");
+		button.addEventListener("pointerdown", (event) => event.stopPropagation());
+		button.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.arrangeNeatly();
+		});
+		controls.append(button);
+		this.arrangeControl = button;
+	}
+
+	private removeArrangeControl(): void {
+		this.arrangeControl?.remove();
+		this.arrangeControl = undefined;
+		for (const control of Array.from(this.view.containerEl.querySelectorAll(
+			"[data-canvas-mindmap-action='arrange']",
+		))) control.remove();
 	}
 
 	private isZoomInOrOutControl(element: HTMLElement): boolean {
@@ -892,6 +939,19 @@ export class CanvasController {
 		return this.applyLayout();
 	}
 
+	arrangeNeatly(): boolean {
+		if (!this.state.enabled || this.adapter.capabilities.readOnly) return false;
+		const rootsInSelection = layoutRootsForSelection(
+			this.adapter.selectionIds(),
+			this.adapter.getData(),
+			this.state,
+		);
+		return this.applyLayout(
+			rootsInSelection.length > 0 ? rootsInSelection : undefined,
+			"Arrange mind map",
+		);
+	}
+
 	setTreeLayout(mode: LayoutMode, nodeId?: NodeId): boolean {
 		const selected = nodeId ?? this.adapter.selectionIds()[0];
 		if (!selected || !this.state.enabled) return false;
@@ -914,7 +974,7 @@ export class CanvasController {
 		return this.applyLayout([rootId]);
 	}
 
-	private applyLayout(rootIds?: NodeId[]): boolean {
+	private applyLayout(rootIds?: NodeId[], label = "Layout mind-map tree"): boolean {
 		const data = this.adapter.getData();
 		const result = calculateLayout(data, this.state, {
 			horizontalGap: this.options.horizontalGap ?? 200,
@@ -922,7 +982,24 @@ export class CanvasController {
 			rootIds,
 		});
 		const allowed = new Set(result.visibleNodeIds);
-		const transaction = this.adapter.transaction("Layout mind-map tree", (next) => {
+		const childByEdge = new Map(
+			Object.entries(this.state.relations).map(([childId, relation]) => [relation.edgeId, childId]),
+		);
+		let changed = false;
+		for (const node of data.nodes) {
+			const position = result.positions[node.id];
+			if (!position || !allowed.has(node.id)) continue;
+			const x = Math.round(position.x);
+			const y = Math.round(position.y);
+			if (node.x !== x || node.y !== y) changed = true;
+		}
+		for (const edge of data.edges) {
+			const sides = result.edgeSides[edge.id];
+			if (!childByEdge.has(edge.id) || !sides) continue;
+			if (edge.fromSide !== sides.fromSide || edge.toSide !== sides.toSide) changed = true;
+		}
+		if (!changed) return false;
+		const transaction = this.adapter.transaction(label, (next) => {
 			for (const node of next.nodes) {
 				const position = result.positions[node.id];
 				if (position && allowed.has(node.id)) {
@@ -931,8 +1008,7 @@ export class CanvasController {
 				}
 			}
 			for (const edge of next.edges) {
-				const childId = Object.entries(this.state.relations).find(([, relation]) => relation.edgeId === edge.id)?.[0];
-				if (childId && result.edgeSides[edge.id]) {
+				if (childByEdge.has(edge.id) && result.edgeSides[edge.id]) {
 					edge.fromSide = result.edgeSides[edge.id].fromSide;
 					edge.toSide = result.edgeSides[edge.id].toSide;
 				}
