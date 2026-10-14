@@ -7,6 +7,7 @@ import {
 	hasStructuralCanvasMutation,
 	hasPassedDragThreshold,
 	intersectionArea,
+	isCanvasInteractionOverlay,
 	isEditorMutationTarget,
 	panViewport,
 	rectanglesTouch,
@@ -62,6 +63,26 @@ test("editor mutations are ignored by structural Canvas refreshes", () => {
 	assert.equal(isEditorMutationTarget(canvasTarget), false);
 	assert.equal(hasStructuralCanvasMutation([{ target: editorTarget } as MutationRecord]), false);
 	assert.equal(hasStructuralCanvasMutation([{ target: canvasTarget } as MutationRecord]), true);
+});
+
+test("native Canvas toolbar swatches are excluded from background gestures", () => {
+	const swatch = {
+		closest: (selector: string) => selector.includes(".canvas-color-picker-item") ? {} as Element : null,
+	} as unknown as Element;
+	const submenu = {
+		closest: (selector: string) => selector.includes(".canvas-submenu") ? {} as Element : null,
+	} as unknown as Element;
+	const selectionOverlay = {
+		closest: (selector: string) => selector.includes(".canvas-selection") ? {} as Element : null,
+	} as unknown as Element;
+	const background = {
+		closest: () => null,
+	} as unknown as Element;
+
+	assert.equal(isCanvasInteractionOverlay(swatch), true);
+	assert.equal(isCanvasInteractionOverlay(submenu), true);
+	assert.equal(isCanvasInteractionOverlay(selectionOverlay), false);
+	assert.equal(isCanvasInteractionOverlay(background), false);
 });
 
 test("Canvas control discovery searches unique view host roots", () => {

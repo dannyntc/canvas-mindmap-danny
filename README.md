@@ -1,4 +1,4 @@
-# Canvas-Mindmap-Danny 1.1.9
+# Canvas-Mindmap-Danny 1.1.10
 
 Canvas-Mindmap-Danny is an Obsidian desktop plugin maintained by Danny and based on the original Canvas Mindmap work by Boninall. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
 
@@ -37,6 +37,7 @@ Existing directed connections are adopted only when they form an unambiguous acy
 - Reparenting replaces the branch's managed connector, so the old parent line is removed while unrelated cross-links remain.
 - Managed connectors choose opposing endpoints from the final card geometry, using the dominant horizontal or vertical direction for a direct path.
 - The node menu provides independent pastel palettes for a node, its branch nodes, its incoming managed arrow, or all managed arrows in its branch. The Theme default action restores native Canvas styling; unrelated cross-links keep their existing colours.
+- The native palette icon above a selected card or selection includes the same pastel colours. Native custom-colour input remains available, and the picker remains usable with mouse or keyboard input.
 - Cards do not display plugin controls when hovered; use the node menu or keyboard shortcuts for mind-map actions.
 - Automatic height is enabled for text cards by default, with per-card manual opt-out.
 
@@ -47,6 +48,7 @@ Existing directed connections are adopted only when they form an unambiguous acy
 - `src/state-store.ts` — versioned per-Canvas metadata migration and cleanup.
 - `src/canvas-adapter.ts` — the private Canvas capability boundary and transaction wrapper.
 - `src/color-palette.ts` — floating pastel palette lifecycle and pointer/keyboard interaction.
+- `src/native-color-picker.ts` — pastel integration for Obsidian's native Canvas colour submenu.
 - `src/canvas-controller.ts` — per-view keyboard, controls, visibility, drag, and structural actions.
 - `src/height-controller.ts` — debounced natural text measurement and resize observation.
 - `src/main.ts` — Obsidian lifecycle, commands, settings, and multi-view synchronization.

@@ -20,6 +20,33 @@ export interface ViewportOrigin {
 const EDITOR_MUTATION_SELECTOR =
 	".cm-editor, .markdown-source-view, .markdown-preview-view, .markdown-rendered, .canvas-node-content";
 
+const CANVAS_INTERACTION_OVERLAY_SELECTOR = [
+	".canvas-submenu",
+	".canvas-menu .clickable-icon",
+	".canvas-menu button",
+	".canvas-color-picker-item",
+	".canvas-color-picker-custom",
+	".canvas-controls",
+	".canvas-control-item",
+	".canvas-mindmap-color-palette",
+	".canvas-mindmap-native-color-controls",
+	".canvas-mindmap-control",
+	".canvas-node-resizer",
+	".canvas-node-resize",
+	"[data-resize-handle]",
+	"input",
+	"textarea",
+	"select",
+	"button",
+	"[role='button']",
+	"[contenteditable='true']",
+].join(", ");
+
+/** Return true when a pointer target belongs to Canvas UI rather than map space. */
+export function isCanvasInteractionOverlay(element: Element): boolean {
+	return !!element.closest(CANVAS_INTERACTION_OVERLAY_SELECTOR);
+}
+
 /**
  * Returns true when a DOM mutation target belongs to card content. Content
  * edits should not trigger a full Canvas control refresh.

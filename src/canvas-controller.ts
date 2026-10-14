@@ -9,12 +9,14 @@ import { applyCanvasColors, branchColorTargets } from "./color-actions";
 import { PASTEL_COLORS } from "./colors";
 import { ColorApplyResult, ColorPaletteHandle, openColorPalette } from "./color-palette";
 import { HeightController } from "./height-controller";
+import { NativeColorPickerHandle, enhanceNativeColorPicker } from "./native-color-picker";
 import {
 	findContactParent,
 	findCanvasControlContainers,
 	findCanvasHistoryAnchor,
 	hasPassedDragThreshold,
 	hasStructuralCanvasMutation,
+	isCanvasInteractionOverlay,
 	panViewport,
 	Rect,
 } from "./interaction";
@@ -162,6 +164,7 @@ export class CanvasController {
 	private readonly historyStates = new Map<string, CanvasMindMapState>();
 	private readonly height: HeightController;
 	private colorPalette?: ColorPaletteHandle;
+	private readonly nativeColorPickers = new Map<HTMLElement, NativeColorPickerHandle>();
 	private removeNativeDragHook?: () => void;
 	private removeDataImportHook?: () => void;
 	private historySyncTimer?: number;
@@ -205,6 +208,7 @@ export class CanvasController {
 		this.win.addEventListener("pointercancel", this.onPointerCancel, true);
 		this.win.addEventListener("blur", this.onWindowBlur);
 		this.observeCanvasDom();
+		this.syncNativeColorPickers();
 		this.refreshRuntime();
 	}
 
@@ -217,6 +221,7 @@ export class CanvasController {
 			}
 		};
 		this.domObserver = new MutationObserver((records) => {
+			this.syncNativeColorPickers();
 			if (!hasStructuralCanvasMutation(records)) return;
 			if (!this.state.enabled || this.domSyncTimer) return;
 			this.domSyncTimer = setTimeout(() => {
@@ -231,6 +236,94 @@ export class CanvasController {
 			}, 0);
 		});
 		observeHosts();
+	}
+
+	private nativeColorSubmenus(): HTMLElement[] {
+		const result: HTMLElement[] = [];
+		const seen = new Set<HTMLElement>();
+		for (const root of this.canvasHostRoots()) {
+			const candidates = [
+				...(root.matches(".canvas-submenu") ? [root] : []),
+				...Array.from(root.querySelectorAll<HTMLElement>(".canvas-submenu")),
+			];
+			for (const submenu of candidates) {
+				if (seen.has(submenu) ||
+					!submenu.querySelector(".canvas-color-picker-item") ||
+					!submenu.querySelector(".canvas-color-picker-custom input[type='color']")) continue;
+				seen.add(submenu);
+				result.push(submenu);
+			}
+		}
+		return result;
+	}
+
+	private selectionColorTarget(): ColorPaletteTarget {
+		const selected = new Set(this.adapter.selectionIds());
+		const data = this.adapter.getData();
+		return {
+			label: "Canvas colours",
+			nodeIds: new Set(data.nodes.filter((node) => selected.has(node.id)).map((node) => node.id)),
+			edgeIds: new Set(data.edges.filter((edge) => selected.has(edge.id)).map((edge) => edge.id)),
+		};
+	}
+
+	private closeNativeColorPicker(submenu: HTMLElement): void {
+		const menu = submenu.closest<HTMLElement>(".canvas-menu");
+		const paletteButton = menu
+			? Array.from(menu.querySelectorAll<HTMLElement>("button, .clickable-icon, [role='button']"))
+				.find((element) => {
+					const icons = Array.from(element.querySelectorAll<HTMLElement>("svg, [data-lucide], .svg-icon"));
+					const semantic = [
+						element.getAttribute("aria-label"),
+						element.getAttribute("title"),
+						element.getAttribute("data-tooltip"),
+						element.className,
+						...icons.map((icon) => `${icon.getAttribute("data-lucide") ?? ""} ${icon.className}`),
+					].filter(Boolean).join(" ").toLowerCase();
+					return semantic.includes("palette") || semantic.includes("color") || semantic.includes("colour");
+				})
+			: undefined;
+		if (paletteButton && typeof (paletteButton as HTMLElement).click === "function") {
+			paletteButton.click();
+			return;
+		}
+		submenu.remove();
+	}
+
+	private syncNativeColorPickers(): void {
+		if (this.disposed || !this.state.enabled || this.adapter.capabilities.readOnly) {
+			for (const handle of this.nativeColorPickers.values()) handle.dispose();
+			this.nativeColorPickers.clear();
+			return;
+		}
+		const submenus = new Set(this.nativeColorSubmenus());
+		for (const [submenu, handle] of this.nativeColorPickers) {
+			if (!submenus.has(submenu) || !submenu.isConnected) {
+				handle.dispose();
+				this.nativeColorPickers.delete(submenu);
+			}
+		}
+		const target = this.selectionColorTarget();
+		let currentColor: string | undefined;
+		try {
+			currentColor = this.targetColor(target);
+		} catch {
+			currentColor = undefined;
+		}
+		for (const submenu of submenus) {
+			if (this.nativeColorPickers.has(submenu)) continue;
+			const handle = enhanceNativeColorPicker({
+				document: submenu.ownerDocument,
+				window: submenu.ownerDocument.defaultView ?? this.win,
+				submenu,
+				colors: PASTEL_COLORS,
+				currentColor,
+				apply: (color) => this.applyColorTarget(target, color, `Canvas colour: ${PASTEL_COLORS.find((pastel) => pastel.hex === color)?.label ?? "Pastel"}`),
+				reset: () => this.applyColorTarget(target, undefined, "Canvas colour: Theme default"),
+				closeNative: () => this.closeNativeColorPicker(submenu),
+			});
+			if (handle) this.nativeColorPickers.set(submenu, handle);
+		}
 	}
 
 	private reconcileStateWithCanvas(): void {
@@ -1327,8 +1420,8 @@ export class CanvasController {
 	private onPointerDown = (event: PointerEvent): void => {
 		if (!this.state.enabled || this.disposed || event.button !== 0) return;
 		if (!isDomElement(event.target)) return;
+		if (isCanvasInteractionOverlay(event.target)) return;
 		this.stopEditingOutside(event.target);
-		if (event.target.closest(".canvas-mindmap-control")) return;
 		if (isEditableTarget(event.target)) return;
 
 		const nodeId = this.nodeIdFromElement(event.target);
@@ -1707,9 +1800,8 @@ export class CanvasController {
 	}
 
 	private isCanvasBackground(element: Element): boolean {
-		return !element.closest(
-			".canvas-node, .canvas-edge, [data-edge-id], .canvas-node-resizer, .canvas-node-resize, [data-resize-handle], .canvas-controls, .canvas-mindmap-control, input, textarea, select, button, [role='button'], [contenteditable='true']",
-		);
+		return !element.closest(".canvas-node, .canvas-edge, [data-edge-id]") &&
+			!isCanvasInteractionOverlay(element);
 	}
 
 	private nodeIdFromElement(element: Element): NodeId | undefined {
@@ -1800,6 +1892,8 @@ export class CanvasController {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.closeColorPalette();
+		for (const handle of this.nativeColorPickers.values()) handle.dispose();
+		this.nativeColorPickers.clear();
 		this.cancelPointerInteraction();
 		this.removeNativeDragHook?.();
 		this.removeNativeDragHook = undefined;

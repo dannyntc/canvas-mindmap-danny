@@ -18,6 +18,7 @@
 	"../src/color-actions.ts",
 	"../src/colors.ts",
 	"../src/color-palette.ts",
+	"../src/native-color-picker.ts",
     "*.test.ts"
   ]
 }
