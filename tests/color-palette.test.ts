@@ -77,3 +77,27 @@ test("a failed colour application stays open and exposes an actionable error", a
 		"This Canvas is read-only.",
 	);
 });
+
+test("a runtime exception from the Canvas callback is visible instead of being swallowed", async () => {
+	const window = await paletteWindow();
+	openColorPalette({
+		document: window.document,
+		window,
+		label: "Node colour",
+		colors: PASTEL_COLORS,
+		apply: () => {
+			throw new Error("Canvas import failed");
+		},
+		reset: () => ({ status: "unchanged" }),
+	});
+
+	const swatch: any = window.document.querySelector(".canvas-mindmap-color-swatch");
+	assert.ok(swatch);
+	swatch.click();
+
+	assert.ok(window.document.querySelector(".canvas-mindmap-color-palette"));
+	assert.equal(
+		window.document.querySelector(".canvas-mindmap-color-palette-error")?.textContent,
+		"Canvas import failed",
+	);
+});

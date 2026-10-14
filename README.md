@@ -1,4 +1,4 @@
-# Canvas-Mindmap-Danny 1.1.8
+# Canvas-Mindmap-Danny 1.1.9
 
 Canvas-Mindmap-Danny is an Obsidian desktop plugin maintained by Danny and based on the original Canvas Mindmap work by Boninall. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
 
@@ -8,6 +8,7 @@ Canvas-Mindmap-Danny is an Obsidian desktop plugin maintained by Danny and based
 npm install
 npm run typecheck
 npm test
+npm run test:ui
 npm run build
 ```
 
@@ -45,6 +46,7 @@ Existing directed connections are adopted only when they form an unambiguous acy
 - `src/layout.ts` — pure variable-size directional and balanced layout.
 - `src/state-store.ts` — versioned per-Canvas metadata migration and cleanup.
 - `src/canvas-adapter.ts` — the private Canvas capability boundary and transaction wrapper.
+- `src/color-palette.ts` — floating pastel palette lifecycle and pointer/keyboard interaction.
 - `src/canvas-controller.ts` — per-view keyboard, controls, visibility, drag, and structural actions.
 - `src/height-controller.ts` — debounced natural text measurement and resize observation.
 - `src/main.ts` — Obsidian lifecycle, commands, settings, and multi-view synchronization.

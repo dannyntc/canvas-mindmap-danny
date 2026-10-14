@@ -67,8 +67,11 @@
     gap: var(--size-2-2);
     max-width: 220px;
     padding: var(--size-2-2);
+    pointer-events: auto;
     position: fixed;
-    z-index: 1000;
+    touch-action: manipulation;
+    user-select: none;
+    z-index: 10000;
 }
 
 .canvas-mindmap-color-palette-title {
@@ -82,6 +85,13 @@
     display: grid;
     gap: var(--size-2-1);
     grid-template-columns: repeat(4, var(--size-4-6));
+}
+
+.canvas-mindmap-color-palette-error {
+    color: var(--text-error);
+    font-size: var(--font-ui-smaller);
+    line-height: var(--line-height-tight);
+    max-width: 210px;
 }
 
 .canvas-mindmap-color-swatch {

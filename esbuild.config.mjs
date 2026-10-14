@@ -15,14 +15,14 @@ const options = {
   minify: production,
   legalComments: "eof",
   banner: {
-    js: "/*! Canvas-Mindmap-Danny 1.1.8 — Copyright (c) Danny; original work by Boninall — MIT License */",
+    js: "/*! Canvas-Mindmap-Danny 1.1.9 — Copyright (c) Danny; original work by Boninall — MIT License */",
   },
 };
 
 if (watch) {
   const context = await esbuild.context(options);
   await context.watch();
-  console.log("Canvas-Mindmap-Danny 1.1.0 — Copyright (c) Danny; original work by Boninall — MIT License */");
+  console.log("Canvas Mindmap development build watching src/");
 } else {
   await esbuild.build(options);
 }
