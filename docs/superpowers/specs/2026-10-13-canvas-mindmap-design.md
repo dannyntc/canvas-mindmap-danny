@@ -2,7 +2,7 @@
 
 ## Intent
 
-Canvas Mindmap 1.1 adds per-Canvas mind-map mode while keeping Canvas nodes, Markdown editing, native colors, native connectors, and ordinary cross-links intact. The plugin must be safe when its private Canvas capabilities are unavailable: it should leave the canvas unchanged and explain what is unavailable.
+Canvas Mindmap 1.1 keeps Canvas nodes, Markdown editing, native colors, native connectors, and ordinary cross-links intact. Mind-map behavior follows plugin activation for each open Canvas. The plugin must be safe when its private Canvas capabilities are unavailable: it should leave the canvas unchanged and explain what is unavailable.
 
 ## Boundaries
 
@@ -10,7 +10,7 @@ Canvas Mindmap 1.1 adds per-Canvas mind-map mode while keeping Canvas nodes, Mar
 - `CanvasAdapter` is the only module that touches Canvas internals.
 - `CanvasMindMapStore` owns versioned plugin metadata keyed by Canvas path.
 - A per-view controller owns keyboard, menu, visibility, height, drag, and layout coordination.
-- The production entry point keeps legacy command IDs and settings while adding opt-in per-canvas activation.
+- The production entry point keeps legacy command IDs and settings while enabling mind-map behavior whenever the plugin is active.
 
 ## Persisted model
 
@@ -22,7 +22,7 @@ Existing directed connections are adopted only when they form an unambiguous acy
 
 Five pure layouts are supported: LR, RL, TB, BT, and balanced. Layout uses actual node dimensions, stable sibling order, collapsed visibility, and explicit balanced branch sides. Dragging moves a branch as a unit and reparenting occurs only on a valid card drop without Cmd/Ctrl. Layout and metadata updates are grouped through an adapter transaction boundary.
 
-The mode toggle defaults off for new canvases and does not rearrange existing content when first enabled. When disabled, runtime hiding, shortcuts, controls, automatic height, and automatic layout are removed while saved relationships remain.
+Mind-map behavior is enabled automatically for every Canvas opened while the plugin is active. Opening a Canvas does not rearrange existing content. Disabling the plugin removes runtime hiding, shortcuts, controls, automatic height, and automatic layout while saved relationships remain.
 
 ## Verification
 

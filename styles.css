@@ -28,36 +28,6 @@
     margin-left: var(--size-2-2);
 }
 
-.canvas-mindmap-toolbar {
-    align-items: center;
-    background: var(--background-primary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: var(--radius-s);
-    display: inline-flex;
-    gap: var(--size-2-2);
-    margin: var(--size-2-2);
-    padding: var(--size-2-1) var(--size-2-2);
-    position: relative;
-    z-index: 20;
-}
-
-.canvas-mindmap-mode-toggle {
-    color: var(--text-normal);
-    font-size: var(--font-ui-small);
-    min-height: var(--size-4-4);
-    padding-inline: var(--size-2-2);
-}
-
-.canvas-mindmap-mode-status {
-    color: var(--text-muted);
-    font-size: var(--font-ui-smaller);
-    user-select: none;
-}
-
-.canvas-mindmap-mode-status.is-enabled {
-    color: var(--text-success);
-}
-
 .canvas-mindmap-controls {
     align-items: center;
     display: flex;
@@ -96,9 +66,7 @@
 }
 
 .canvas-mindmap-control:hover,
-.canvas-mindmap-control:focus-visible,
-.canvas-mindmap-mode-toggle:hover,
-.canvas-mindmap-mode-toggle:focus-visible {
+.canvas-mindmap-control:focus-visible {
     background: var(--background-modifier-hover);
     color: var(--text-accent);
 }

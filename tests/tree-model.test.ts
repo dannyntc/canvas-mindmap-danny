@@ -12,6 +12,7 @@ import {
 	hiddenNodeIds,
 	managedEdgeIds,
 	parentOf,
+	replaceManagedEdge,
 	relationChildren,
 	reorderSibling,
 	rootOf,
@@ -87,6 +88,39 @@ test("reparenting rejects cycles and preserves managed connector identity", () =
 	assert.equal(attachChild(state, "d", "c", "e-cd"), true);
 	assert.equal(parentOf(state, "d"), "c");
 	assert.equal(state.relations.d.edgeId, "e-cd");
+});
+
+test("reparenting replaces the managed connector without removing cross-links", () => {
+	const data = treeData();
+	data.edges.push(edge("cross-a-d", "a", "d"));
+	const state = stateWithRelations();
+	const replacement = edge("e-cd-new", "c", "d");
+
+	replaceManagedEdge(data, state.relations.d.edgeId, replacement);
+
+	assert.deepEqual(
+		data.edges.map((item) => item.id).sort(),
+		["cross-a-d", "e-ab", "e-ac", "e-cd-new"],
+	);
+	assert.equal(data.edges.find((item) => item.id === "e-cd-new")?.fromNode, "c");
+	assert.equal(data.edges.some((item) => item.id === "e-bd"), false);
+});
+
+test("repeated reparenting leaves only the latest managed connector", () => {
+	const data = treeData();
+	const state = stateWithRelations();
+	const first = edge("e-cd-new", "c", "d");
+	const second = edge("e-ad-new", "a", "d");
+
+	replaceManagedEdge(data, state.relations.d.edgeId, first);
+	replaceManagedEdge(data, first.id, second);
+
+	assert.equal(data.edges.some((item) => item.id === "e-bd"), false);
+	assert.equal(data.edges.some((item) => item.id === "e-cd-new"), false);
+	assert.deepEqual(
+		data.edges.filter((item) => item.toNode === "d").map((item) => item.id),
+		["e-ad-new"],
+	);
 });
 
 test("branch deletion removes descendants and incident edges but not unrelated nodes", () => {

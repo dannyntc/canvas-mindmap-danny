@@ -105,7 +105,7 @@ export function defaultCanvasState(
 ): CanvasMindMapState {
 	return {
 		version: CURRENT_STATE_VERSION,
-		enabled: false,
+		enabled: true,
 		autoLayout: true,
 		autoHeight: true,
 		defaultLayout,

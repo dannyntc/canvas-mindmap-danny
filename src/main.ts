@@ -67,7 +67,7 @@ const DEFAULT_LEGACY_SETTINGS: LegacySettings = {
 	advanced: {
 		transferToCommands: false,
 		showChangelogAutomatically: true,
-		lastUpdatedVersion: "1.1.0",
+		lastUpdatedVersion: "1.1.1",
 	},
 };
 
@@ -200,13 +200,6 @@ export default class CanvasMindMapPlugin extends Plugin {
 			onStateChange: (nextState) => this.updateControllerState(controller, path, nextState),
 			notify: (message) => new Notice(message),
 			isExternalResizeOwner: () => this.hasExternalResizePlugin(),
-			onEnabled: (requested) => {
-				const adopted = this.store.adopt(path, adapter.getData(), legacyLayout(this.settings.layout.autoLayoutDirection));
-				adopted.defaultLayout = requested.defaultLayout;
-				adopted.enabled = requested.enabled;
-				this.store.set(path, adopted);
-				return adopted;
-			},
 		});
 		this.controllers.set(view, controller);
 		this.controllerPaths.set(controller, path);
@@ -275,7 +268,6 @@ export default class CanvasMindMapPlugin extends Plugin {
 	}
 
 	private registerCommands(): void {
-		this.command("toggle-mind-map-mode", "Toggle mind-map mode", (controller) => controller.toggleEnabled(), false);
 		this.command("layout-selected-tree", "Layout selected mind-map tree", (controller) => controller.layoutSelectedTree());
 		this.command("layout-all-trees", "Layout all mind-map trees", (controller) => controller.layoutAllTrees());
 		this.command("create-child-node", "Create child node", (controller) => controller.createChild(controller.adapter.selectionIds()[0]));
@@ -296,12 +288,12 @@ export default class CanvasMindMapPlugin extends Plugin {
 		this.addCommand({
 			id: "open-changelog",
 			name: "Open Canvas Mindmap changelog",
-			callback: () => new Notice("Canvas Mindmap 1.1.0 adds opt-in per-Canvas mind-map mode."),
+			callback: () => new Notice("Canvas Mindmap 1.1.1 repairs mouse navigation and touch-to-parent dragging."),
 		});
 	}
 
 	async saveSettings(): Promise<void> {
-		this.settings.advanced.lastUpdatedVersion = "1.1.0";
+		this.settings.advanced.lastUpdatedVersion = "1.1.1";
 		const current = this.store.snapshot();
 		await this.saveData({ ...this.settings, ...current });
 	}
@@ -345,7 +337,7 @@ class CanvasMindMapSettingTab extends PluginSettingTab {
 				}));
 		new Setting(container)
 			.setName("Automatic layout for new canvases")
-			.setDesc("Canvas Mindmap mode is still enabled separately per Canvas.")
+			.setDesc("Canvas Mindmap behavior is enabled automatically whenever the plugin is active.")
 			.addToggle((toggle: any) => toggle
 				.setValue(this.pluginRef.settings.layout.autoLayout)
 				.onChange(async (value: boolean) => {

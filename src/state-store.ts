@@ -56,7 +56,9 @@ export function normalizeCanvasState(
 	const raw = isRecord(value) ? value : {};
 	const state = defaultCanvasState(defaultLayout);
 	state.version = Number(raw.version) || 1;
-	state.enabled = raw.enabled === true;
+	// Mind-map behavior follows plugin activation. Keep the field for
+	// backwards-compatible metadata, but normalize legacy disabled records.
+	state.enabled = true;
 	state.autoLayout = raw.autoLayout !== false;
 	state.autoHeight = raw.autoHeight !== false;
 	state.defaultLayout = normalizeLayout(raw.defaultLayout, defaultLayout);

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CanvasMindMapStore, migratePluginData } from "../src/state-store";
 import { defaultCanvasState } from "../src/types";
 
-test("migration preserves legacy settings and adds disabled per-canvas state", () => {
+test("migration preserves legacy settings and enables mind-map behavior by default", () => {
 	const migrated = migratePluginData({
 		navigate: { useNavigate: false },
 		layout: { direction: "RL" },
@@ -13,7 +13,7 @@ test("migration preserves legacy settings and adds disabled per-canvas state", (
 	assert.equal(legacy.layout.direction, "RL");
 	assert.deepEqual(migrated.mindMaps, {});
 	const store = new CanvasMindMapStore(migrated);
-	assert.equal(store.get("Maps/demo.canvas").enabled, false);
+	assert.equal(store.get("Maps/demo.canvas").enabled, true);
 });
 
 test("canvas records survive rename and stale metadata cleanup", () => {
@@ -37,8 +37,8 @@ test("canvas records survive rename and stale metadata cleanup", () => {
 test("state snapshots are defensive copies", () => {
 	const store = new CanvasMindMapStore();
 	const state = store.get("copy.canvas");
-	state.enabled = true;
-	assert.equal(store.get("copy.canvas").enabled, false);
+	state.enabled = false;
+	assert.equal(store.get("copy.canvas").enabled, true);
 	store.set("copy.canvas", state);
 	const snapshot = store.snapshot();
 	(snapshot.mindMaps["copy.canvas"] as any).enabled = false;

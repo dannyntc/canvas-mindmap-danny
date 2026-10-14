@@ -125,6 +125,25 @@ export function managedEdgeIds(state: CanvasMindMapState): Set<string> {
 	return new Set(Object.values(state.relations).map((relation) => relation.edgeId));
 }
 
+/**
+ * Replace one managed connector in a Canvas snapshot.
+ *
+ * Canvas keeps live edge instances keyed by their IDs. Removing the old
+ * managed edge before adding the replacement prevents a reparent operation
+ * from leaving the old live connector behind when the endpoints change.
+ * Unrelated edges, including cross-links, are retained.
+ */
+export function replaceManagedEdge(
+	data: CanvasData,
+	previousEdgeId: string | undefined,
+	replacement: CanvasEdgeData,
+): void {
+	data.edges = data.edges.filter((edge) =>
+		edge.id !== previousEdgeId && edge.id !== replacement.id,
+	);
+	data.edges.push(replacement);
+}
+
 export function crossLinkEdges(
 	data: CanvasData,
 	state: CanvasMindMapState,

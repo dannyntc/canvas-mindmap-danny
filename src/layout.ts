@@ -233,6 +233,26 @@ function positionForNode(node: CanvasNodeData): Point {
 	return { x: node.x, y: node.y };
 }
 
+export function chooseStraightConnectorSides(
+	from: Pick<CanvasNodeData, "x" | "y" | "width" | "height">,
+	to: Pick<CanvasNodeData, "x" | "y" | "width" | "height">,
+): EdgeSides {
+	const dx = to.x + to.width / 2 - (from.x + from.width / 2);
+	const dy = to.y + to.height / 2 - (from.y + from.height / 2);
+	if (Math.abs(dx) >= Math.abs(dy)) {
+		const toRight = dx >= 0;
+		return {
+			fromSide: toRight ? "right" : "left",
+			toSide: toRight ? "left" : "right",
+		};
+	}
+	const below = dy >= 0;
+	return {
+		fromSide: below ? "bottom" : "top",
+		toSide: below ? "top" : "bottom",
+	};
+}
+
 function edgeSidesFor(
 	data: CanvasData,
 	state: CanvasMindMapState,
@@ -246,19 +266,10 @@ function edgeSidesFor(
 		if (!from || !to) continue;
 		const fromPosition = positions[edge.fromNode] ?? positionForNode(from);
 		const toPosition = positions[edge.toNode] ?? positionForNode(to);
-		const dx = toPosition.x + to.width / 2 - (fromPosition.x + from.width / 2);
-		const dy = toPosition.y + to.height / 2 - (fromPosition.y + from.height / 2);
-		if (Math.abs(dx) >= Math.abs(dy)) {
-			sides[edge.id] = {
-				fromSide: dx >= 0 ? "right" : "left",
-				toSide: dx >= 0 ? "left" : "right",
-			};
-		} else {
-			sides[edge.id] = {
-				fromSide: dy >= 0 ? "bottom" : "top",
-				toSide: dy >= 0 ? "top" : "bottom",
-			};
-		}
+		sides[edge.id] = chooseStraightConnectorSides(
+			{ ...from, ...fromPosition },
+			{ ...to, ...toPosition },
+		);
 	}
 	return sides;
 }

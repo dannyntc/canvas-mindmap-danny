@@ -17,6 +17,28 @@ export interface ViewportOrigin {
 	zoom: number;
 }
 
+const EDITOR_MUTATION_SELECTOR =
+	".cm-editor, .markdown-source-view, .markdown-preview-view, .markdown-rendered, .canvas-node-content";
+
+/**
+ * Returns true when a DOM mutation target belongs to card content. Content
+ * edits should not trigger a full Canvas control refresh.
+ */
+export function isEditorMutationTarget(target: Node): boolean {
+	const candidate = target as unknown as {
+		closest?: (selector: string) => Element | null;
+		parentElement?: Element | null;
+	};
+	const element = typeof candidate.closest === "function"
+		? candidate as unknown as Element
+		: candidate.parentElement;
+	return !!element?.closest?.(EDITOR_MUTATION_SELECTOR);
+}
+
+export function hasStructuralCanvasMutation(records: readonly MutationRecord[]): boolean {
+	return records.some((record) => !isEditorMutationTarget(record.target));
+}
+
 export function rectanglesTouch(first: Rect, second: Rect): boolean {
 	return first.left <= second.right &&
 		first.right >= second.left &&

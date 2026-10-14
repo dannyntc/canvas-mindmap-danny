@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assignMissingBalancedSides, calculateLayout } from "../src/layout";
+import { assignMissingBalancedSides, calculateLayout, chooseStraightConnectorSides } from "../src/layout";
 import { attachChild } from "../src/tree-model";
 import { CanvasData, defaultCanvasState } from "../src/types";
 
@@ -78,4 +78,34 @@ test("independent trees are laid out without moving an unselected root", () => {
 	const result = calculateLayout(canvas, map, { rootIds: ["root"], horizontalGap: 20, verticalGap: 15 });
 	assert.deepEqual(result.positions.other, { x: 900, y: 900 });
 	assert.deepEqual(result.positions.root, { x: 100, y: 100 });
+});
+
+test("straight connector sides follow final card geometry", () => {
+	assert.deepEqual(
+		chooseStraightConnectorSides(node("parent", 0, 0, 100, 100), node("child", 220, 10, 100, 100)),
+		{ fromSide: "right", toSide: "left" },
+	);
+	assert.deepEqual(
+		chooseStraightConnectorSides(node("parent", 220, 10, 100, 100), node("child", 0, 0, 100, 100)),
+		{ fromSide: "left", toSide: "right" },
+	);
+	assert.deepEqual(
+		chooseStraightConnectorSides(node("parent", 0, 0, 100, 100), node("child", 10, 220, 100, 100)),
+		{ fromSide: "bottom", toSide: "top" },
+	);
+	assert.deepEqual(
+		chooseStraightConnectorSides(node("parent", 10, 220, 100, 100), node("child", 0, 0, 100, 100)),
+		{ fromSide: "top", toSide: "bottom" },
+	);
+});
+
+test("straight connector routing uses card centers and breaks equal axes horizontally", () => {
+	assert.deepEqual(
+		chooseStraightConnectorSides(node("parent", 0, 0, 400, 40), node("child", 300, 100, 20, 300)),
+		{ fromSide: "bottom", toSide: "top" },
+	);
+	assert.deepEqual(
+		chooseStraightConnectorSides(node("parent", 0, 0, 100, 100), node("child", 100, 100, 100, 100)),
+		{ fromSide: "right", toSide: "left" },
+	);
 });

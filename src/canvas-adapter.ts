@@ -18,11 +18,27 @@ export interface CanvasNodeLike {
 	nodeEl?: HTMLElement;
 	isEditing?: boolean;
 	startEditing?: () => void;
+	stopEditing?: () => void;
 	setIsEditing?: (editing: boolean) => void;
 	moveTo?: (position: Point) => void;
 	resize?: (size: { width: number; height: number }) => void;
 	setColor?: (color: string) => void;
 	[key: string]: unknown;
+}
+
+export interface NativeSelectionDragCallbacks {
+	move?: (event: PointerEvent) => unknown;
+	end?: (event: PointerEvent) => unknown;
+	cancel?: (event?: PointerEvent) => unknown;
+	cleanup?: () => unknown;
+	[key: string]: unknown;
+}
+
+export interface NativeSelectionDragHooks {
+	onStart?: (event: PointerEvent, node?: CanvasNodeLike) => void;
+	onMove?: (event: PointerEvent) => void;
+	onEnd?: (event: PointerEvent) => void;
+	onCancel?: (event?: PointerEvent) => void;
 }
 
 export interface CanvasViewport {
@@ -45,6 +61,12 @@ export interface CanvasLike {
 	scale?: number;
 	getViewport?: () => CanvasViewport;
 	setViewport?: (this: CanvasLike, x: number, y: number, zoom: number) => void;
+	handleSelectionDrag?: (
+		this: CanvasLike,
+		event: PointerEvent,
+		target: HTMLElement,
+		node?: CanvasNodeLike,
+	) => NativeSelectionDragCallbacks;
 	getData?: () => CanvasData;
 	importData?: (data: CanvasData, removeMissing?: boolean) => void;
 	requestSave?: () => void;
@@ -171,12 +193,34 @@ export class CanvasAdapter {
 		const node = this.node(nodeId);
 		if (!node || this.capabilities.readOnly) return false;
 		if (isFunction(node.startEditing)) node.startEditing();
-		else node.setIsEditing?.(true);
+		else if (isFunction(node.setIsEditing)) node.setIsEditing(true);
+		else return false;
 		return true;
 	}
 
-	stopEditing(nodeId: NodeId): void {
-		this.node(nodeId)?.setIsEditing?.(false);
+	stopEditing(nodeId: NodeId): boolean {
+		const node = this.node(nodeId);
+		if (!node) return false;
+		if (isFunction(node.stopEditing)) node.stopEditing();
+		else if (isFunction(node.setIsEditing)) node.setIsEditing(false);
+		else return false;
+		return true;
+	}
+
+	focusCanvas(): boolean {
+		const target = this.canvas.wrapperEl;
+		if (!target || typeof target.focus !== "function") return false;
+		try {
+			target.focus({ preventScroll: true });
+			return true;
+		} catch {
+			try {
+				target.focus();
+				return true;
+			} catch {
+				return false;
+			}
+		}
 	}
 
 	moveNode(nodeId: NodeId, position: Point): boolean {
@@ -207,6 +251,79 @@ export class CanvasAdapter {
 
 	requestFrame(): void {
 		this.canvas.requestFrame?.();
+	}
+
+	observeSelectionDrag(hooks: NativeSelectionDragHooks): (() => void) | undefined {
+		const original = this.canvas.handleSelectionDrag;
+		if (!isFunction(original)) return undefined;
+		const canvas = this.canvas;
+		const wrapped = function (
+			this: CanvasLike,
+			event: PointerEvent,
+			target: HTMLElement,
+			node?: CanvasNodeLike,
+		): NativeSelectionDragCallbacks {
+			const callbacks = original.call(this, event, target, node);
+			hooks.onStart?.(event, node);
+			if (!callbacks || typeof callbacks !== "object") return callbacks;
+			const nativeCallbacks = callbacks as NativeSelectionDragCallbacks;
+			return {
+				...nativeCallbacks,
+				move: (moveEvent: PointerEvent) => {
+					const result = nativeCallbacks.move?.call(nativeCallbacks, moveEvent);
+					hooks.onMove?.(moveEvent);
+					return result;
+				},
+				end: (endEvent: PointerEvent) => {
+					const result = nativeCallbacks.end?.call(nativeCallbacks, endEvent);
+					hooks.onEnd?.(endEvent);
+					return result;
+				},
+				cancel: (cancelEvent?: PointerEvent) => {
+					const result = nativeCallbacks.cancel?.call(nativeCallbacks, cancelEvent);
+					hooks.onCancel?.(cancelEvent);
+					return result;
+				},
+			};
+		};
+		try {
+			this.canvas.handleSelectionDrag = wrapped;
+		} catch {
+			return undefined;
+		}
+		return () => {
+			if (this.canvas.handleSelectionDrag === wrapped) {
+				try {
+					this.canvas.handleSelectionDrag = original;
+				} catch {
+					// Another runtime owns this private method now.
+				}
+			}
+		};
+	}
+
+	observeDataImport(onImport: (data: CanvasData) => void): (() => void) | undefined {
+		const original = this.canvas.importData;
+		if (!isFunction(original)) return undefined;
+		const wrapped = function (this: CanvasLike, data: CanvasData, removeMissing?: boolean): unknown {
+			const result = original.call(this, data, removeMissing);
+			onImport(cloneJson(data));
+			return result;
+		};
+		try {
+			this.canvas.importData = wrapped;
+		} catch {
+			return undefined;
+		}
+		return () => {
+			if (this.canvas.importData === wrapped) {
+				try {
+					this.canvas.importData = original;
+				} catch {
+					// Another runtime owns this private method now.
+				}
+			}
+		};
 	}
 
 	viewport(): CanvasViewport | undefined {

@@ -1,13 +1,19 @@
 import { Menu, Notice, setTooltip } from "obsidian";
-import { CanvasAdapter, CanvasLike, CanvasViewport } from "./canvas-adapter";
+import {
+	CanvasAdapter,
+	CanvasLike,
+	CanvasNodeLike,
+	CanvasViewport,
+} from "./canvas-adapter";
 import { HeightController } from "./height-controller";
 import {
 	findContactParent,
 	hasPassedDragThreshold,
+	hasStructuralCanvasMutation,
 	panViewport,
 	Rect,
 } from "./interaction";
-import { assignMissingBalancedSides, calculateLayout } from "./layout";
+import { assignMissingBalancedSides, calculateLayout, chooseStraightConnectorSides } from "./layout";
 import {
 	CanvasData,
 	CanvasEdgeData,
@@ -31,6 +37,7 @@ import {
 	hiddenNodeIds,
 	parentOf,
 	relationChildren,
+	replaceManagedEdge,
 	reorderSibling,
 	rootOf,
 	roots,
@@ -58,13 +65,14 @@ export interface ControllerOptions {
 	horizontalGap?: number;
 	verticalGap?: number;
 	isExternalResizeOwner?: () => boolean;
-	onEnabled?: (requested: CanvasMindMapState) => CanvasMindMapState;
 }
 
 interface DragSnapshot {
 	nodeId: NodeId;
 	pointerId: number;
 	startClient: { x: number; y: number };
+	beforeData: CanvasData;
+	beforeState: CanvasMindMapState;
 	branchIds: Set<NodeId>;
 	directSelection: Set<NodeId>;
 	movementRoots: Set<NodeId>;
@@ -73,6 +81,7 @@ interface DragSnapshot {
 	active: boolean;
 	canReparent: boolean;
 	modifierDuringDrag: boolean;
+	nativeLifecycle?: boolean;
 	contactTargetId?: NodeId;
 	frame?: number;
 }
@@ -85,6 +94,11 @@ interface PanSnapshot {
 	startViewport: CanvasViewport;
 	active: boolean;
 	frame?: number;
+}
+
+interface HistoryBaseline {
+	beforeData: CanvasData;
+	beforeState: CanvasMindMapState;
 }
 
 function randomId(prefix: string, used: Set<string>): string {
@@ -121,9 +135,6 @@ export class CanvasController {
 	readonly view: CanvasViewLike;
 	private readonly options: ControllerOptions;
 	private state: CanvasMindMapState;
-	private toolbar?: HTMLElement;
-	private modeButton?: HTMLButtonElement;
-	private modeStatus?: HTMLElement;
 	private keyTarget?: HTMLElement;
 	private domObserver?: MutationObserver;
 	private domSyncTimer?: ReturnType<typeof setTimeout>;
@@ -132,7 +143,12 @@ export class CanvasController {
 	private pan?: PanSnapshot;
 	private panNoticeShown = false;
 	private readonly zoomControlStates = new WeakMap<HTMLElement, { ariaHidden: string | null; tabIndex: string | null }>();
+	private readonly historyStates = new Map<string, CanvasMindMapState>();
 	private readonly height: HeightController;
+	private removeNativeDragHook?: () => void;
+	private removeDataImportHook?: () => void;
+	private historySyncTimer?: number;
+	private lastCanvasStructureKey?: string;
 
 	private get win(): Window {
 		return this.view.containerEl.ownerDocument.defaultView ?? window;
@@ -141,7 +157,7 @@ export class CanvasController {
 	constructor(options: ControllerOptions) {
 		this.options = options;
 		this.view = options.view;
-		this.state = cloneJson(options.state);
+		this.state = { ...cloneJson(options.state), enabled: true };
 		this.adapter = new CanvasAdapter(options.view.canvas!);
 		this.height = new HeightController({
 			adapter: this.adapter,
@@ -156,8 +172,15 @@ export class CanvasController {
 
 	mount(): void {
 		if (this.disposed) return;
-		this.createToolbar();
 		this.keyTarget = this.adapter.canvas.wrapperEl ?? this.view.containerEl;
+		this.removeNativeDragHook = this.adapter.observeSelectionDrag({
+			onStart: (event, node) => this.onNativeDragStart(event, node),
+			onMove: (event) => this.onNativeDragMove(event),
+			onEnd: (event) => this.onNativeDragEnd(event),
+			onCancel: (event) => this.onNativeDragCancel(event),
+		});
+		this.lastCanvasStructureKey = this.canvasStructureKey(this.adapter.getData());
+		this.removeDataImportHook = this.adapter.observeDataImport((data) => this.scheduleHistorySync(data));
 		this.keyTarget.addEventListener("keydown", this.onKeyDown, true);
 		this.keyTarget.addEventListener("pointerdown", this.onPointerDown, true);
 		this.win.addEventListener("pointermove", this.onPointerMove, true);
@@ -171,7 +194,8 @@ export class CanvasController {
 	private observeCanvasDom(): void {
 		if (typeof MutationObserver === "undefined") return;
 		const target = this.view.containerEl;
-		this.domObserver = new MutationObserver(() => {
+		this.domObserver = new MutationObserver((records) => {
+			if (!hasStructuralCanvasMutation(records)) return;
 			if (!this.state.enabled || this.domSyncTimer) return;
 			this.domSyncTimer = setTimeout(() => {
 				this.domSyncTimer = undefined;
@@ -188,15 +212,75 @@ export class CanvasController {
 	}
 
 	private reconcileStateWithCanvas(): void {
-		const clean = sanitizeState(this.adapter.getData(), this.state, this.state.defaultLayout);
+		const data = this.adapter.getData();
+		const knownState = this.historyStates.get(JSON.stringify(data));
+		if (knownState) {
+			if (JSON.stringify(knownState) !== JSON.stringify(this.state)) {
+				this.state = cloneJson(knownState);
+				this.commitState();
+				this.applyVisibility();
+				this.refreshControls();
+			}
+			return;
+		}
+		const clean = sanitizeState(data, this.state, this.state.defaultLayout);
 		if (JSON.stringify(clean) === JSON.stringify(this.state)) return;
 		this.state = clean;
 		this.commitState();
 	}
 
+	private rememberHistoryStates(
+		beforeData: CanvasData,
+		beforeState: CanvasMindMapState,
+		afterData: CanvasData,
+		afterState: CanvasMindMapState,
+	): void {
+		this.historyStates.set(JSON.stringify(beforeData), cloneJson(beforeState));
+		this.historyStates.set(JSON.stringify(afterData), cloneJson(afterState));
+	}
+
+	private canvasStructureKey(data: CanvasData): string {
+		return JSON.stringify({
+			nodes: data.nodes
+				.map((node) => ({
+					id: node.id,
+					type: node.type,
+					x: node.x,
+					y: node.y,
+					width: node.width,
+					height: node.height,
+				}))
+				.sort((first, second) => first.id.localeCompare(second.id)),
+			edges: data.edges
+				.map((edge) => ({
+					id: edge.id,
+					fromNode: edge.fromNode,
+					fromSide: edge.fromSide,
+					toNode: edge.toNode,
+					toSide: edge.toSide,
+				}))
+				.sort((first, second) => first.id.localeCompare(second.id)),
+		});
+	}
+
+	private scheduleHistorySync(data?: CanvasData): void {
+		const structureKey = this.canvasStructureKey(data ?? this.adapter.getData());
+		if (structureKey === this.lastCanvasStructureKey) return;
+		this.lastCanvasStructureKey = structureKey;
+		if (this.historySyncTimer) this.win.clearTimeout(this.historySyncTimer);
+		this.historySyncTimer = this.win.setTimeout(() => {
+			this.historySyncTimer = undefined;
+			if (this.disposed) return;
+			this.reconcileStateWithCanvas();
+			this.updateZoomControls();
+			this.applyVisibility();
+			this.refreshControls();
+		}, 0);
+	}
+
 	refreshFromState(state: CanvasMindMapState): void {
 		if (this.disposed) return;
-		this.state = cloneJson(state);
+		this.state = { ...cloneJson(state), enabled: true };
 		this.refreshRuntime();
 	}
 
@@ -208,48 +292,6 @@ export class CanvasController {
 		return this.state.enabled;
 	}
 
-	toggleEnabled(): boolean {
-		if (this.adapter.capabilities.readOnly) {
-			this.notify("This Canvas is read-only.");
-			return false;
-		}
-		if (!this.adapter.capabilities.available) {
-			this.notify(`Mind-map mode is unavailable: ${this.adapter.capabilities.missing.join(", ")}.`);
-			return false;
-		}
-		const enabled = !this.state.enabled;
-		if (enabled) {
-			const requested = { ...cloneJson(this.state), enabled: true };
-			this.state = cloneJson(this.options.onEnabled?.(requested) ?? requested);
-			// Adoption may start from a previously saved disabled state. The
-			// requested transition is authoritative for this view.
-			this.state.enabled = true;
-		} else {
-			this.state.enabled = false;
-		}
-		this.commitState();
-		this.refreshRuntime();
-		return this.state.enabled;
-	}
-
-	setEnabled(enabled: boolean): boolean {
-		if (enabled === this.state.enabled) return enabled;
-		if (enabled && (this.adapter.capabilities.readOnly || !this.adapter.capabilities.available)) {
-			this.notify("Mind-map mode cannot be enabled for this Canvas version.");
-			return false;
-		}
-		if (enabled) {
-			const requested = { ...cloneJson(this.state), enabled: true };
-			this.state = cloneJson(this.options.onEnabled?.(requested) ?? requested);
-			this.state.enabled = true;
-		} else {
-			this.state.enabled = false;
-		}
-		this.commitState();
-		this.refreshRuntime();
-		return enabled;
-	}
-
 	private notify(message: string): void {
 		if (this.options.notify) this.options.notify(message);
 		else new Notice(message);
@@ -259,40 +301,7 @@ export class CanvasController {
 		this.options.onStateChange(cloneJson(this.state));
 	}
 
-	private createToolbar(): void {
-		const doc = this.view.containerEl.ownerDocument;
-		const host = this.view.containerEl.querySelector<HTMLElement>(".canvas-controls") ??
-			this.view.containerEl;
-		this.toolbar = doc.createElement("div");
-		this.toolbar.className = "canvas-mindmap-toolbar";
-		this.toolbar.setAttribute("role", "toolbar");
-		this.modeButton = doc.createElement("button");
-		this.modeButton.type = "button";
-		this.modeButton.className = "clickable-icon canvas-mindmap-mode-toggle";
-		this.modeButton.addEventListener("click", () => this.toggleEnabled());
-		this.modeStatus = doc.createElement("span");
-		this.modeStatus.className = "canvas-mindmap-mode-status";
-		this.modeStatus.setAttribute("aria-live", "polite");
-		this.toolbar.append(this.modeButton, this.modeStatus);
-		host.prepend(this.toolbar);
-		this.updateToolbar();
-	}
-
-	private updateToolbar(): void {
-		if (!this.modeButton || !this.modeStatus) return;
-		this.modeButton.textContent = this.state.enabled ? "Mind-map: On" : "Mind-map: Off";
-		this.modeButton.setAttribute("aria-pressed", this.state.enabled ? "true" : "false");
-		this.modeButton.setAttribute(
-			"aria-label",
-			this.state.enabled ? "Disable mind-map mode" : "Enable mind-map mode",
-		);
-		setTooltip(this.modeButton, "Toggle mind-map mode for this Canvas");
-		this.modeStatus.textContent = this.state.enabled ? "Enabled" : "Disabled";
-		this.modeStatus.classList.toggle("is-enabled", this.state.enabled);
-	}
-
 	private refreshRuntime(): void {
-		this.updateToolbar();
 		this.updateZoomControls();
 		if (!this.state.enabled || this.disposed) {
 			this.cancelPointerInteraction();
@@ -335,17 +344,25 @@ export class CanvasController {
 	}
 
 	private isZoomInOrOutControl(element: HTMLElement): boolean {
-		const icon = element.querySelector<HTMLElement>(
-			"svg.lucide-plus, svg.lucide-minus, .lucide-plus, .lucide-minus, [data-lucide='plus'], [data-lucide='minus'], svg, [data-lucide], .svg-icon",
-		);
+		// Obsidian's native sidebar controls are div.canvas-control-item elements
+		// containing Lucide icons. Check the icon identity first so localized
+		// labels and unrelated plugin buttons cannot affect the result.
+		const icons = Array.from(element.querySelectorAll<HTMLElement>(
+			"svg, [data-lucide], .svg-icon",
+		));
+		if (icons.some((icon) => {
+			const iconName = icon.getAttribute("data-lucide")?.toLowerCase();
+			return iconName === "plus" || iconName === "minus" ||
+				icon.classList.contains("lucide-plus") || icon.classList.contains("lucide-minus");
+		})) return true;
+
 		const semanticText = [
 			element.getAttribute("aria-label"),
 			element.getAttribute("title"),
 			element.getAttribute("data-tooltip"),
 			element.getAttribute("data-tooltip-content"),
 			element.className,
-			icon?.getAttribute("data-lucide"),
-			icon?.getAttribute("class"),
+			...icons.map((icon) => `${icon.getAttribute("data-lucide") ?? ""} ${icon.getAttribute("class") ?? ""}`),
 		].filter(Boolean).join(" ").toLowerCase();
 		return /(?:zoom[\s_-]*(?:in|out)|(?:zoom|canvas)[\s_-]*(?:plus|minus)|lucide[-_](?:plus|minus)|(?:^|[\s_-])(?:plus|minus)(?:$|[\s_-]))/.test(semanticText);
 	}
@@ -462,7 +479,15 @@ export class CanvasController {
 		if (!this.state.enabled || this.disposed || this.adapter.capabilities.readOnly) return;
 		if (isEditableTarget(event.target)) {
 			if (event.key === "Escape") {
-				for (const nodeId of this.adapter.selectionIds()) this.adapter.stopEditing(nodeId);
+				let stopped = false;
+				for (const node of this.adapter.nodes()) {
+					if (node.isEditing) stopped = this.adapter.stopEditing(node.id) || stopped;
+				}
+				if (stopped) {
+					this.adapter.focusCanvas();
+					event.preventDefault();
+					event.stopPropagation();
+				}
 			}
 			return;
 		}
@@ -592,29 +617,31 @@ export class CanvasController {
 		id: string,
 		parent: CanvasNodeData,
 		child: CanvasNodeData,
-		mode: LayoutMode,
-		side?: BranchSide,
 	): CanvasEdgeData {
-		const branch = side ?? (child.x >= parent.x ? "right" : "left");
-		if (mode === "balanced") {
-			return {
-				id,
-				fromNode: parent.id,
-				fromSide: branch === "left" ? "left" : "right",
-				toNode: child.id,
-				toSide: branch === "left" ? "right" : "left",
-			};
+		const sides = chooseStraightConnectorSides(parent, child);
+		return { id, fromNode: parent.id, toNode: child.id, ...sides };
+	}
+
+	private updateManagedConnectorSides(
+		data: CanvasData,
+		state: CanvasMindMapState,
+		affectedNodeIds: ReadonlySet<NodeId>,
+	): boolean {
+		const nodes = new Map(data.nodes.map((node) => [node.id, node]));
+		let changed = false;
+		for (const [childId, relation] of Object.entries(state.relations)) {
+			if (!affectedNodeIds.has(childId)) continue;
+			const parent = nodes.get(relation.parentId);
+			const child = nodes.get(childId);
+			const edge = data.edges.find((candidate) => candidate.id === relation.edgeId);
+			if (!parent || !child || !edge) continue;
+			const sides = chooseStraightConnectorSides(parent, child);
+			if (edge.fromSide === sides.fromSide && edge.toSide === sides.toSide) continue;
+			edge.fromSide = sides.fromSide;
+			edge.toSide = sides.toSide;
+			changed = true;
 		}
-		if (mode === "right-to-left") {
-			return { id, fromNode: parent.id, fromSide: "left", toNode: child.id, toSide: "right" };
-		}
-		if (mode === "top-to-bottom") {
-			return { id, fromNode: parent.id, fromSide: "bottom", toNode: child.id, toSide: "top" };
-		}
-		if (mode === "bottom-to-top") {
-			return { id, fromNode: parent.id, fromSide: "top", toNode: child.id, toSide: "bottom" };
-		}
-		return { id, fromNode: parent.id, fromSide: "right", toNode: child.id, toSide: "left" };
+		return changed;
 	}
 
 	createChild(parentId: NodeId | undefined, side?: BranchSide): boolean {
@@ -628,7 +655,7 @@ export class CanvasController {
 		const mode = this.currentLayout(parentId);
 		const position = this.positionForChild(parent, this.options.childWidth ?? 200, this.options.childHeight ?? 100, nodeId, side);
 		const child = this.newTextNode(parent, nodeId, position);
-		const edge = this.createEdge(edgeId, parent, child, mode, side);
+		const edge = this.createEdge(edgeId, parent, child);
 		const order = relationChildren(this.state, parentId).length;
 		if (!canReparent(this.state, nodeId, parentId)) return false;
 		const transaction = this.adapter.transaction("Create child", (data) => {
@@ -675,7 +702,7 @@ export class CanvasController {
 			position = { x: source.x - width - (this.options.horizontalGap ?? 200), y: source.y };
 		}
 		const child = this.newTextNode(parent, newId, position);
-		const edge = this.createEdge(edgeId, parent, child, mode, side);
+		const edge = this.createEdge(edgeId, parent, child);
 		const sourceOrder = this.state.relations[nodeId]?.order ?? relationChildren(this.state, parentId).length;
 		const order = direction === "before" ? sourceOrder - 0.5 : sourceOrder + 0.5;
 		const transaction = this.adapter.transaction(
@@ -729,8 +756,9 @@ export class CanvasController {
 	stopEditingSelected(): boolean {
 		const selected = this.adapter.selectionIds()[0];
 		if (!selected) return false;
-		this.adapter.stopEditing(selected);
-		return true;
+		const stopped = this.adapter.stopEditing(selected);
+		if (stopped) this.adapter.focusCanvas();
+		return stopped;
 	}
 
 	cycleSelectedLayout(): boolean {
@@ -784,7 +812,7 @@ export class CanvasController {
 				rootLayout === "balanced" && parentId === rootOf(nextState, selected) ? "right" : undefined,
 			));
 			child.text = heading.text;
-			const edge = this.createEdge(edgeId, parent, child, rootLayout);
+			const edge = this.createEdge(edgeId, parent, child);
 			nextData.nodes.push(child);
 			nextData.edges.push(edge);
 			attachChild(nextState, newId, parentId, edgeId, relationChildren(nextState, parentId).length);
@@ -985,10 +1013,16 @@ export class CanvasController {
 		return true;
 	}
 
-	reparentNode(childId: NodeId, parentId: NodeId, side?: BranchSide): boolean {
+	reparentNode(
+		childId: NodeId,
+		parentId: NodeId,
+		side?: BranchSide,
+		historyBaseline?: HistoryBaseline,
+	): boolean {
 		if (!this.state.enabled || childId === parentId || !canReparent(this.state, childId, parentId)) return false;
 		if (parentOf(this.state, childId) === parentId) return false;
 		const data = this.adapter.getData();
+		const beforeState = cloneJson(this.state);
 		const child = data.nodes.find((node) => node.id === childId);
 		const parent = data.nodes.find((node) => node.id === parentId);
 		if (!child || !parent || child.type === "group" || parent.type === "group") return false;
@@ -996,7 +1030,12 @@ export class CanvasController {
 		const nextState = cloneJson(this.state);
 		const previous = nextState.relations[childId];
 		const ids = this.nextIds();
-		const edgeId = previous?.edgeId ?? randomId("canvas-mindmap-edge", ids.edgeIds);
+		// Reparenting gets a fresh edge ID. Canvas can retain a live edge object
+		// when an existing ID changes endpoints, which leaves the old connector
+		// visible beside the new one. Removing the old ID and adding a fresh edge
+		// makes the replacement explicit to both Canvas data and its edge index.
+		const edgeId = randomId("canvas-mindmap-edge", ids.edgeIds);
+		const previousEdge = previous && data.edges.find((edge) => edge.id === previous.edgeId);
 		const order = relationChildren(nextState, parentId).length;
 		if (!attachChild(nextState, childId, parentId, edgeId, order)) return false;
 		const mode = this.currentLayout(parentId);
@@ -1018,18 +1057,13 @@ export class CanvasController {
 				rootIds: affectedRoots,
 			})
 			: undefined;
+		const affectedBranch = new Set(descendants(nextState, childId, true));
 		const transaction = this.adapter.transaction("Reparent branch", (next) => {
-			const existing = next.edges.find((candidate) => candidate.id === edgeId);
-			const edge = existing ?? this.createEdge(edgeId, parent, child, mode, actualSide);
-			if (!existing) {
-				next.edges.push(edge);
-			}
-			edge.fromNode = parentId;
-			edge.toNode = childId;
-			if (mode === "balanced") {
-				edge.fromSide = actualSide === "left" ? "left" : "right";
-				edge.toSide = actualSide === "left" ? "right" : "left";
-			}
+			const edge = {
+				...(previousEdge ? cloneJson(previousEdge) : {}),
+				...this.createEdge(edgeId, parent, child),
+			};
+			replaceManagedEdge(next, previous?.edgeId, edge);
 			if (plannedLayout) {
 				const visible = new Set(plannedLayout.visibleNodeIds);
 				for (const node of next.nodes) {
@@ -1039,18 +1073,18 @@ export class CanvasController {
 						node.y = Math.round(position.y);
 					}
 				}
-				for (const managed of Object.values(nextState.relations)) {
-					const nextEdge = next.edges.find((candidate) => candidate.id === managed.edgeId);
-					const sides = plannedLayout.edgeSides[managed.edgeId];
-					if (nextEdge && sides) {
-						nextEdge.fromSide = sides.fromSide;
-						nextEdge.toSide = sides.toSide;
-					}
-				}
 			}
+			this.updateManagedConnectorSides(next, nextState, affectedBranch);
 		});
 		if (!transaction) return false;
 		this.state = nextState;
+		this.rememberHistoryStates(
+			historyBaseline?.beforeData ?? transaction.beforeData,
+			historyBaseline?.beforeState ?? beforeState,
+			transaction.beforeData,
+			beforeState,
+		);
+		this.historyStates.set(JSON.stringify(transaction.afterData), cloneJson(nextState));
 		this.commitState();
 		this.applyVisibility();
 		this.refreshControls();
@@ -1060,7 +1094,8 @@ export class CanvasController {
 	private onPointerDown = (event: PointerEvent): void => {
 		if (!this.state.enabled || this.disposed || event.button !== 0) return;
 		if (!isDomElement(event.target)) return;
-		if (event.target.closest(".canvas-mindmap-control, .canvas-mindmap-toolbar")) return;
+		this.stopEditingOutside(event.target);
+		if (event.target.closest(".canvas-mindmap-control")) return;
 		if (isEditableTarget(event.target)) return;
 
 		const nodeId = this.nodeIdFromElement(event.target);
@@ -1103,17 +1138,65 @@ export class CanvasController {
 			nodeId,
 			pointerId: event.pointerId,
 			startClient: { x: event.clientX, y: event.clientY },
+			beforeData: this.adapter.getData(),
+			beforeState: cloneJson(this.state),
 			branchIds,
 			directSelection,
 			movementRoots,
 			positions,
-			modifier: event.metaKey || event.ctrlKey,
+			modifier: event.metaKey || event.ctrlKey || event.altKey,
 			active: false,
 			canReparent: directSelection.size === 1 && directSelection.has(nodeId) &&
 				movementRoots.size === 1 && movementRoots.has(nodeId),
-			modifierDuringDrag: event.metaKey || event.ctrlKey,
+			modifierDuringDrag: event.metaKey || event.ctrlKey || event.altKey,
 		};
 	};
+
+	private stopEditingOutside(target: Element): void {
+		let stopped = false;
+		for (const node of this.adapter.nodes()) {
+			if (!node.isEditing || node.nodeEl?.contains(target)) continue;
+			stopped = this.adapter.stopEditing(node.id) || stopped;
+		}
+		if (!stopped) return;
+		const nodeId = this.nodeIdFromElement(target);
+		const isResizeHandle = !!target.closest(
+			".canvas-node-resizer, .canvas-node-resize, [data-resize-handle]",
+		);
+		if (!isEditableTarget(target) && (!nodeId || !isResizeHandle)) this.adapter.focusCanvas();
+	}
+
+	private onNativeDragStart(event: PointerEvent, node?: CanvasNodeLike): void {
+		const drag = this.drag;
+		if (!drag || drag.pointerId !== event.pointerId || !node || node.id !== drag.nodeId) return;
+		drag.nativeLifecycle = true;
+		drag.active = true;
+	}
+
+	private onNativeDragMove(event: PointerEvent): void {
+		const drag = this.drag;
+		if (!drag?.nativeLifecycle || drag.pointerId !== event.pointerId) return;
+		drag.modifierDuringDrag = event.metaKey || event.ctrlKey || event.altKey;
+		if (drag.modifierDuringDrag) {
+			this.updateContactHighlight(drag, undefined);
+			return;
+		}
+		this.syncDraggedBranch(drag);
+		this.updateContactHighlight(drag, this.findContactTarget(drag));
+	}
+
+	private onNativeDragEnd(event: PointerEvent): void {
+		if (this.drag?.nativeLifecycle && this.drag.pointerId === event.pointerId) this.finishDrag(event);
+	}
+
+	private onNativeDragCancel(event?: PointerEvent): void {
+		const drag = this.drag;
+		if (!drag?.nativeLifecycle || (event && drag.pointerId !== event.pointerId)) return;
+		if (drag.frame !== undefined) this.win.cancelAnimationFrame(drag.frame);
+		this.restoreDraggedBranch(drag);
+		this.drag = undefined;
+		this.clearContactHighlight();
+	}
 
 	private onPointerMove = (event: PointerEvent): void => {
 		if (this.pan?.pointerId === event.pointerId) {
@@ -1132,7 +1215,8 @@ export class CanvasController {
 		const drag = this.drag;
 		if (!drag || this.disposed || this.adapter.capabilities.readOnly) return;
 		if (drag.pointerId !== event.pointerId) return;
-		drag.modifierDuringDrag = event.metaKey || event.ctrlKey;
+		if (drag.nativeLifecycle) return;
+		drag.modifierDuringDrag = event.metaKey || event.ctrlKey || event.altKey;
 		if (!drag.active && hasPassedDragThreshold(
 			drag.startClient,
 			{ x: event.clientX, y: event.clientY },
@@ -1154,30 +1238,47 @@ export class CanvasController {
 			event.preventDefault();
 			return;
 		}
+		if (this.drag?.nativeLifecycle) return;
+		this.finishDrag(event);
+	};
+
+	private finishDrag(event: PointerEvent): void {
 		const drag = this.drag;
-		if (!drag) return;
-		if (drag.pointerId !== event.pointerId) return;
+		if (!drag || drag.pointerId !== event.pointerId) return;
 		this.drag = undefined;
 		if (drag.frame !== undefined) this.win.cancelAnimationFrame(drag.frame);
 		this.syncDraggedBranch(drag);
-		drag.modifierDuringDrag = event.metaKey || event.ctrlKey;
-		const targetId = drag.active && !drag.modifier && !drag.modifierDuringDrag && !event.metaKey && !event.ctrlKey
+		drag.modifierDuringDrag = event.metaKey || event.ctrlKey || event.altKey;
+		const targetId = drag.active && !drag.modifier && !drag.modifierDuringDrag &&
+			!event.metaKey && !event.ctrlKey && !event.altKey
 			? this.findContactTarget(drag)
 			: undefined;
 		this.clearContactHighlight();
 		if (!this.state.enabled || !drag.active) return;
 		const moved = this.branchMoved(drag);
-		if (moved) this.adapter.requestSave();
-		if (!drag.canReparent || this.adapter.capabilities.readOnly || drag.modifier || drag.modifierDuringDrag || event.metaKey || event.ctrlKey) return;
-		if (!targetId) return;
+		const suppressed = !drag.canReparent || this.adapter.capabilities.readOnly || drag.modifier ||
+			drag.modifierDuringDrag || event.metaKey || event.ctrlKey || event.altKey;
+		if (!targetId || suppressed) {
+			if (moved) {
+				const routed = this.adapter.transaction("Route moved branch connectors", (next) =>
+					this.updateManagedConnectorSides(next, this.state, drag.branchIds));
+				if (!routed) this.adapter.requestSave();
+			}
+			return;
+		}
 		const side = this.balancedDropSide(drag.nodeId, targetId);
-		this.reparentNode(drag.nodeId, targetId, side);
-	};
+		this.reparentNode(drag.nodeId, targetId, side, {
+			beforeData: drag.beforeData,
+			beforeState: drag.beforeState,
+		});
+	}
 
 	private onPointerCancel = (event: PointerEvent): void => {
 		if (this.pan?.pointerId === event.pointerId) this.cancelPan();
 		if (this.drag?.pointerId === event.pointerId) {
-			if (this.drag.frame !== undefined) this.win.cancelAnimationFrame(this.drag.frame);
+			const drag = this.drag;
+			if (drag.frame !== undefined) this.win.cancelAnimationFrame(drag.frame);
+			this.restoreDraggedBranch(drag);
 			this.drag = undefined;
 		}
 		this.clearContactHighlight();
@@ -1260,6 +1361,14 @@ export class CanvasController {
 		this.adapter.requestFrame();
 	}
 
+	private restoreDraggedBranch(drag: DragSnapshot): void {
+		for (const branchId of drag.branchIds) {
+			const original = drag.positions[branchId];
+			if (original) this.adapter.moveNode(branchId, original);
+		}
+		this.adapter.requestFrame();
+	}
+
 	private branchMoved(drag: DragSnapshot): boolean {
 		return [...drag.movementRoots].some((rootId) => {
 			const current = this.adapter.node(rootId);
@@ -1286,7 +1395,11 @@ export class CanvasController {
 		const hidden = hiddenNodeIds(this.state);
 		const dataById = new Map(this.adapter.getData().nodes.map((node) => [node.id, node]));
 		const candidates = this.adapter.nodes()
-			.filter((node) => node.id !== drag.nodeId && dataById.get(node.id)?.type !== "group" && !drag.branchIds.has(node.id) && !hidden.has(node.id))
+			.filter((node) => {
+				const dataNode = dataById.get(node.id);
+				return !!dataNode && dataNode.type !== "group" &&
+					node.id !== drag.nodeId && !drag.branchIds.has(node.id) && !hidden.has(node.id);
+			})
 			.map((node) => {
 				const bounds = this.nodeBounds(node.id);
 				return bounds ? { id: node.id, bounds, eligible: canReparent(this.state, drag.nodeId, node.id) } : undefined;
@@ -1355,13 +1468,14 @@ export class CanvasController {
 	private cancelPointerInteraction(): void {
 		this.cancelPan();
 		if (this.drag?.frame !== undefined) this.win.cancelAnimationFrame(this.drag.frame);
+		if (this.drag) this.restoreDraggedBranch(this.drag);
 		this.drag = undefined;
 		this.clearContactHighlight();
 	}
 
 	private isCanvasBackground(element: Element): boolean {
 		return !element.closest(
-			".canvas-node, .canvas-edge, [data-edge-id], .canvas-node-resizer, .canvas-node-resize, [data-resize-handle], .canvas-controls, .canvas-mindmap-control, .canvas-mindmap-toolbar, input, textarea, select, button, [role='button'], [contenteditable='true']",
+			".canvas-node, .canvas-edge, [data-edge-id], .canvas-node-resizer, .canvas-node-resize, [data-resize-handle], .canvas-controls, .canvas-mindmap-control, input, textarea, select, button, [role='button'], [contenteditable='true']",
 		);
 	}
 
@@ -1415,6 +1529,10 @@ export class CanvasController {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.cancelPointerInteraction();
+		this.removeNativeDragHook?.();
+		this.removeNativeDragHook = undefined;
+		this.removeDataImportHook?.();
+		this.removeDataImportHook = undefined;
 		this.revealAll();
 		this.removeControls();
 		this.restoreZoomControls(this.view.containerEl);
@@ -1426,7 +1544,7 @@ export class CanvasController {
 		this.win.removeEventListener("pointercancel", this.onPointerCancel, true);
 		this.win.removeEventListener("blur", this.onWindowBlur);
 		if (this.domSyncTimer) clearTimeout(this.domSyncTimer);
+		if (this.historySyncTimer) this.win.clearTimeout(this.historySyncTimer);
 		this.domObserver?.disconnect();
-		this.toolbar?.remove();
 	}
 }

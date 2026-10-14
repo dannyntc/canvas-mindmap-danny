@@ -1,4 +1,4 @@
-# Canvas Mindmap 1.1.0
+# Canvas-Mindmap-Danny 1.1.1
 
 Canvas Mindmap is an Obsidian desktop plugin by Boninall, extended here with opt-in per-Canvas mind-map mode. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
 
@@ -15,22 +15,25 @@ The production outputs are `main.js`, `manifest.json`, and `styles.css`. Obsidia
 
 ## Install locally
 
-1. Create `<vault>/.obsidian/plugins/canvas-mindmap/`.
+1. Create `<vault>/.obsidian/plugins/canvas-mindmap-danny/`.
 2. Copy `main.js`, `manifest.json`, and `styles.css` into that directory.
 3. In Obsidian, reload installed plugins if needed, then enable **Canvas Mindmap**.
-4. Open a Canvas and use the **Mind-map: Off** toolbar toggle to enable mode for that Canvas only.
+4. Open a Canvas; mind-map behavior is enabled automatically.
 
-New Canvases remain disabled until explicitly enabled. Existing directed connections are adopted only when they form an unambiguous acyclic tree; ambiguous connections remain cross-links.
+Existing directed connections are adopted only when they form an unambiguous acyclic tree; ambiguous connections remain cross-links.
 
 ## Main interactions
 
 - `Tab` creates a child; `Enter` creates a sibling for a non-root card.
 - `Space` starts editing; native Markdown editor keys remain native while editing.
+- Clicking outside an editing card exits editing immediately and returns focus to Canvas navigation.
 - Arrow keys select the nearest visible card.
 - `Delete`/`Backspace` deletes the selected branch, including collapsed descendants.
-- In enabled mode, the native zoom-in and zoom-out buttons are hidden; mouse-wheel and trackpad zoom remain available.
+- The native Canvas zoom-in and zoom-out controls are hidden; mouse-wheel and trackpad zoom remain available.
 - Left-drag empty canvas space to pan around the map. Hold `Shift` while dragging empty space to retain native Canvas selection-box behavior.
 - Drag a single branch until its card touches another visible card. The prospective parent is highlighted; release while touching to attach the branch. Hold `Cmd` on macOS or `Ctrl` on Windows to move without attaching.
+- Reparenting replaces the branch's managed connector, so the old parent line is removed while unrelated cross-links remain.
+- Managed connectors choose opposing endpoints from the final card geometry, using the dominant horizontal or vertical direction for a direct path.
 - The node menu and hover controls provide layout, collapse, branch selection, duplication, coloring, and sibling-order actions.
 - Automatic height is enabled for text cards by default, with per-card manual opt-out.
 

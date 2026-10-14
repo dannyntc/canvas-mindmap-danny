@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
 	findContactParent,
+	hasStructuralCanvasMutation,
 	hasPassedDragThreshold,
 	intersectionArea,
+	isEditorMutationTarget,
 	panViewport,
 	rectanglesTouch,
 } from "../src/interaction";
@@ -45,4 +47,17 @@ test("pan viewport keeps zoom and converts screen movement to world movement", (
 	});
 	assert.equal(hasPassedDragThreshold({ x: 10, y: 10 }, { x: 13, y: 11 }), false);
 	assert.equal(hasPassedDragThreshold({ x: 10, y: 10 }, { x: 14, y: 10 }), true);
+});
+
+test("editor mutations are ignored by structural Canvas refreshes", () => {
+	const editorTarget = {
+		closest: (selector: string) => selector.includes(".cm-editor") ? {} as Element : null,
+	} as unknown as Node;
+	const canvasTarget = {
+		closest: () => null,
+	} as unknown as Node;
+	assert.equal(isEditorMutationTarget(editorTarget), true);
+	assert.equal(isEditorMutationTarget(canvasTarget), false);
+	assert.equal(hasStructuralCanvasMutation([{ target: editorTarget } as MutationRecord]), false);
+	assert.equal(hasStructuralCanvasMutation([{ target: canvasTarget } as MutationRecord]), true);
 });
