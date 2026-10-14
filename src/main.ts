@@ -69,7 +69,7 @@ const DEFAULT_LEGACY_SETTINGS: LegacySettings = {
 	advanced: {
 		transferToCommands: false,
 		showChangelogAutomatically: true,
-		lastUpdatedVersion: "1.1.18",
+		lastUpdatedVersion: "1.1.19",
 	},
 };
 
@@ -295,12 +295,12 @@ export default class CanvasMindMapPlugin extends Plugin {
 		this.addCommand({
 			id: "open-changelog",
 			name: "Open Canvas Mindmap changelog",
-			callback: () => new Notice("Canvas Mindmap 1.1.18 adds shared branching arrows with movable junctions."),
+			callback: () => new Notice("Canvas Mindmap 1.1.19 fixes duplicate native and branching arrows."),
 		});
 	}
 
 	async saveSettings(): Promise<void> {
-		this.settings.advanced.lastUpdatedVersion = "1.1.18";
+		this.settings.advanced.lastUpdatedVersion = "1.1.19";
 		const current = this.store.snapshot();
 		await this.saveData({ ...this.settings, ...current });
 	}

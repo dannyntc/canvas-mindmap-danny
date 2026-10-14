@@ -193,17 +193,18 @@ export class BranchingOverlay {
 		state: CanvasMindMapState,
 		hidden: ReadonlySet<NodeId>,
 		getNodeElement: (nodeId: NodeId) => HTMLElement | undefined,
-	): void {
-		if (this.disposed) return;
+	): ReadonlySet<EdgeId> {
+		const renderedEdgeIds = new Set<EdgeId>();
+		if (this.disposed) return renderedEdgeIds;
 		this.currentData = data;
 		this.currentState = state;
 		this.currentHidden = new Set(hidden);
 		this.getNodeElement = getNodeElement;
 		this.groups = [];
 		this.svg.replaceChildren();
-		if (!state.branchingEnabled) return;
+		if (!state.branchingEnabled) return renderedEdgeIds;
 		const wrapperRect = elementRect(this.wrapper);
-		if (!wrapperRect) return;
+		if (!wrapperRect) return renderedEdgeIds;
 		const dataNodes = new Map(data.nodes.map((node) => [node.id, node]));
 		const edgeToChild = new Map(Object.entries(state.relations).map(([childId, relation]) => [relation.edgeId, childId]));
 		const groups = managedBranchGroups(data, state);
@@ -245,6 +246,9 @@ export class BranchingOverlay {
 					edgeIds: geometries.map((geometry) => geometry.edge.id),
 				});
 			}
+			if (visibleGroup.junctions.length > 0) {
+				for (const geometry of geometries) renderedEdgeIds.add(geometry.edge.id);
+			}
 			visibleGroup.junctions.sort((left, right) => left.ratio - right.ratio || left.id.localeCompare(right.id));
 			const anchorTarget = geometries.find((geometry) => geometry.edge.id === visibleGroup.junctions[0]?.anchorEdgeId) ?? geometries[0];
 			visibleGroup.anchor = anchorTarget;
@@ -255,6 +259,7 @@ export class BranchingOverlay {
 			this.groups.push(visibleGroup);
 			this.renderGroup(visibleGroup, geometries, defs);
 		}
+		return renderedEdgeIds;
 	}
 
 	previewJunction(junctionId: string, ratio: number): void {

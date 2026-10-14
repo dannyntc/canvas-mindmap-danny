@@ -219,3 +219,29 @@ test("stopEditing invokes the native exit method and reports support", () => {
 	assert.equal(editing, false);
 	assert.equal(adapter.stopEditing("missing"), false);
 });
+
+test("edge visibility uses live Canvas edge paths and ignores the branching overlay", async () => {
+	const { Window } = await import("happy-dom");
+	const window = new Window();
+	const wrapper = window.document.createElement("div") as unknown as HTMLElement;
+	const nativeEdges = window.document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	const nativePath = window.document.createElementNS("http://www.w3.org/2000/svg", "path");
+	const branchingOverlay = window.document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	const pluginPath = window.document.createElementNS("http://www.w3.org/2000/svg", "path");
+	nativeEdges.classList.add("canvas-edges");
+	branchingOverlay.classList.add("canvas-mindmap-branching-overlay");
+	pluginPath.dataset.edgeId = "edge";
+	nativeEdges.appendChild(nativePath);
+	branchingOverlay.appendChild(pluginPath);
+	wrapper.append(nativeEdges as unknown as Node, branchingOverlay as unknown as Node);
+	const target = canvas({
+		wrapperEl: wrapper,
+		edges: new Map([["edge", { path: { interaction: { el: nativePath }, display: { el: nativePath } } }]]),
+	});
+	const adapter = new CanvasAdapter(target);
+	adapter.setEdgeVisibility("edge", false);
+	assert.equal(nativePath.style.visibility, "hidden");
+	assert.equal(pluginPath.style.visibility, "");
+	adapter.setEdgeVisibility("edge", true);
+	assert.equal(nativePath.style.visibility, "");
+});

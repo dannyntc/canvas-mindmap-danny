@@ -52,6 +52,7 @@ export interface CanvasViewport {
 
 export interface CanvasLike {
 	nodes?: Map<string, CanvasNodeLike> | Record<string, CanvasNodeLike>;
+	edges?: Map<string, unknown> | Record<string, unknown>;
 	selection?: Set<CanvasNodeLike | string>;
 	readonly?: boolean;
 	wrapperEl?: HTMLElement;
@@ -105,6 +106,31 @@ function asNodeMap(
 ): Map<string, CanvasNodeLike> {
 	if (nodes instanceof Map) return nodes;
 	return new Map(Object.entries(nodes ?? {}));
+}
+
+function asEdgeMap(
+	edges: Map<string, unknown> | Record<string, unknown> | undefined,
+): Map<string, unknown> {
+	if (edges instanceof Map) return edges;
+	return new Map(Object.entries(edges ?? {}));
+}
+
+type DomElement = HTMLElement | SVGElement;
+
+function domElement(value: unknown): DomElement | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const candidate = value as { nodeType?: unknown; style?: unknown };
+	return candidate.nodeType === 1 && candidate.style ? value as DomElement : undefined;
+}
+
+function nestedDomElement(value: unknown, key: string): DomElement | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	return domElement((value as Record<string, unknown>)[key]);
+}
+
+function nestedNestedDomElement(value: unknown, firstKey: string, secondKey: string): DomElement | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	return nestedDomElement((value as Record<string, unknown>)[firstKey], secondKey);
 }
 
 export class CanvasAdapter {
@@ -450,8 +476,30 @@ export class CanvasAdapter {
 	setEdgeVisibility(edgeId: string, visible: boolean): void {
 		const wrapper = this.canvas.wrapperEl;
 		if (!wrapper) return;
-		const selector = `[data-edge-id="${CSS.escape(edgeId)}"]`;
-		for (const element of Array.from(wrapper.querySelectorAll<HTMLElement>(selector))) {
+		const elements = new Set<DomElement>();
+		const liveEdge = asEdgeMap(this.canvas.edges).get(edgeId);
+		if (liveEdge && typeof liveEdge === "object") {
+			const edge = liveEdge as Record<string, unknown>;
+			const path = edge.path;
+			for (const candidate of [
+				domElement(path),
+				nestedNestedDomElement(path, "interaction", "el"),
+				nestedNestedDomElement(path, "display", "el"),
+				nestedDomElement(edge, "pathEl"),
+				nestedDomElement(edge, "edgeEl"),
+				nestedDomElement(edge, "el"),
+				nestedDomElement(edge.fromLineEnd, "el"),
+				nestedDomElement(edge.toLineEnd, "el"),
+			]) {
+				if (candidate && wrapper.contains(candidate)) elements.add(candidate);
+			}
+		}
+		for (const element of Array.from(wrapper.querySelectorAll<HTMLElement>("[data-edge-id]"))) {
+			if (element.dataset.edgeId === edgeId && !element.closest(".canvas-mindmap-branching-overlay")) {
+				elements.add(element);
+			}
+		}
+		for (const element of elements) {
 			element.classList.toggle("canvas-mindmap-hidden", !visible);
 			element.style.pointerEvents = visible ? "" : "none";
 			element.style.visibility = visible ? "" : "hidden";

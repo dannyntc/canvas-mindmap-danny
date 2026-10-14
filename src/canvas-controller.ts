@@ -472,10 +472,28 @@ export class CanvasController {
 		this.branchingOverlay = undefined;
 	}
 
+	private syncNativeEdgeVisibility(
+		data: CanvasData,
+		hidden: ReadonlySet<NodeId>,
+		customEdges: ReadonlySet<string> = new Set(),
+	): void {
+		const managedEdgeIds = new Set(Object.values(this.state.relations).map((relation) => relation.edgeId));
+		for (const edge of data.edges) {
+			if (!managedEdgeIds.has(edge.id)) continue;
+			this.adapter.setEdgeVisibility(
+				edge.id,
+				!customEdges.has(edge.id) && !hidden.has(edge.fromNode) && !hidden.has(edge.toNode),
+			);
+		}
+	}
+
 	private refreshBranchingOverlay(): void {
 		if (this.disposed || !this.state.enabled || !this.state.branchingEnabled ||
 			!this.adapter.capabilities.available || !this.adapter.canvas.wrapperEl) {
 			this.removeBranchingOverlay();
+			if (!this.disposed && this.state.enabled && this.adapter.capabilities.available) {
+				this.syncNativeEdgeVisibility(this.adapter.getData(), hiddenNodeIds(this.state));
+			}
 			return;
 		}
 		if (!this.branchingOverlay) {
@@ -491,25 +509,13 @@ export class CanvasController {
 		}
 		const data = this.adapter.getData();
 		const hidden = hiddenNodeIds(this.state);
-		const customEdges = new Set(
-			managedBranchGroups(data, this.state)
-				.flatMap((group) => {
-					const visibleEdges = group.edges.filter((edge) =>
-						!hidden.has(edge.fromNode) && !hidden.has(edge.toNode),
-					);
-					return (visibleEdges.length > 1 || group.junctions.length > 0)
-						? visibleEdges.map((edge) => edge.id)
-						: [];
-				}),
+		const customEdges = this.branchingOverlay.update(
+			data,
+			this.state,
+			hidden,
+			(nodeId) => this.adapter.node(nodeId)?.nodeEl,
 		);
-		for (const edge of data.edges) {
-			if (!Object.values(this.state.relations).some((relation) => relation.edgeId === edge.id)) continue;
-			this.adapter.setEdgeVisibility(
-				edge.id,
-				!customEdges.has(edge.id) && !hidden.has(edge.fromNode) && !hidden.has(edge.toNode),
-			);
-		}
-		this.branchingOverlay.update(data, this.state, hidden, (nodeId) => this.adapter.node(nodeId)?.nodeEl);
+		this.syncNativeEdgeVisibility(data, hidden, customEdges);
 	}
 
 	private nodeIdAtPoint(clientX: number, clientY: number): NodeId | undefined {

@@ -26,6 +26,7 @@ This repository reconstructs the customised Canvas Mindmap plugin from the prese
 | `v1.1.16` | Increase real-time space-making clearance from 24px to 48px for dragging, branch movement, and node creation. |
 | `v1.1.17` | Ignore Shift+ArrowUp/Down so selected cards are not shifted by the shortcut. |
 | `v1.1.18` | Add shared branching arrows with multiple movable junctions, line-based child creation, existing-card attachment, persistence, and a Canvas setting toggle. |
+| `v1.1.19` | Fix duplicate native and branching arrows when adding mind-map children or siblings by synchronizing live Canvas edge visibility with the rendered branching route. |
 
 ## Reconstruction method
 
