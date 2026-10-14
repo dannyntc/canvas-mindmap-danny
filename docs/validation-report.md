@@ -1,4 +1,4 @@
-# Canvas Mindmap 1.1.4 validation report
+# Canvas Mindmap 1.1.5 validation report
 
 Date: 2026-10-14
 
@@ -6,13 +6,15 @@ Date: 2026-10-14
 
 - `npm install` completed with the pinned lockfile and reported no vulnerabilities.
 - `npm run typecheck` passes with strict TypeScript checking.
-- `npm test` passes all 34 Node model/layout/interaction tests.
+- `npm test` passes all 38 Node model/layout/interaction/colour tests.
 - `npm run build` produces the installable `main.js` bundle.
-- `manifest.json` reports plugin id `canvas-mindmap-danny`, version `1.1.4`, desktop-only distribution, and minimum Obsidian version `1.5.0`.
+- `manifest.json` reports plugin id `canvas-mindmap-danny`, version `1.1.5`, desktop-only distribution, and minimum Obsidian version `1.5.0`.
 - The original 1.0.2 distribution remains available under `baseline/`.
 - Mind-map behavior is enabled automatically when the plugin opens a Canvas; the former sidebar toggle and toggle command are removed.
 
 The automated coverage exercises unambiguous tree adoption, cycle and multiple-parent rejection, traversal/order, reparenting, branch deletion, duplication with fresh IDs, stale metadata cleanup, migration/rename, all five layouts, unequal card dimensions, balanced branch sides, independent trees, and collapsed layout bounds.
+
+The colour coverage exercises the fixed eight-colour pastel palette, independent node and managed-arrow targeting, branch targeting, theme-default resets, and preservation of unrelated cross-link colours. Colours are persisted in standard Canvas node and edge `color` fields.
 
 ## Runtime boundary
 

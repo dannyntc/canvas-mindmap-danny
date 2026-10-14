@@ -99,6 +99,71 @@
     color: var(--text-normal);
 }
 
+.canvas-mindmap-color-palette {
+    align-items: stretch;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-l);
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-2-2);
+    max-width: 220px;
+    padding: var(--size-2-2);
+    position: fixed;
+    z-index: 1000;
+}
+
+.canvas-mindmap-color-palette-title {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-weight: var(--font-semibold);
+    padding: 0 var(--size-2-1);
+}
+
+.canvas-mindmap-color-swatches {
+    display: grid;
+    gap: var(--size-2-1);
+    grid-template-columns: repeat(4, var(--size-4-6));
+}
+
+.canvas-mindmap-color-swatch {
+    background: var(--canvas-mindmap-swatch);
+    border: 2px solid transparent;
+    border-radius: var(--radius-s);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+    cursor: pointer;
+    height: var(--size-4-6);
+    min-width: var(--size-4-6);
+    padding: 0;
+}
+
+.canvas-mindmap-color-swatch:hover,
+.canvas-mindmap-color-swatch:focus-visible,
+.canvas-mindmap-color-swatch.is-selected {
+    border-color: var(--text-normal);
+    outline: none;
+    transform: scale(1.06);
+}
+
+.canvas-mindmap-color-reset {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    color: var(--text-normal);
+    cursor: pointer;
+    font-size: var(--font-ui-smaller);
+    min-height: var(--size-4-6);
+    padding: 0 var(--size-2-2);
+}
+
+.canvas-mindmap-color-reset:hover,
+.canvas-mindmap-color-reset:focus-visible {
+    background: var(--background-modifier-hover);
+    border-color: var(--interactive-accent);
+    outline: none;
+}
+
 .canvas-mindmap-panning {
     cursor: grabbing !important;
 }
@@ -123,4 +188,4 @@
     transform: translateX(-50%);
     white-space: nowrap;
     z-index: 20;
-}
+}

@@ -1,6 +1,6 @@
-# Canvas-Mindmap-Danny 1.1.4
+# Canvas-Mindmap-Danny 1.1.5
 
-Canvas Mindmap is an Obsidian desktop plugin by Boninall, extended here with opt-in per-Canvas mind-map mode. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
+Canvas-Mindmap-Danny is an Obsidian desktop plugin maintained by Danny and based on the original Canvas Mindmap work by Boninall. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
 
 ## Build
 
@@ -35,7 +35,7 @@ Existing directed connections are adopted only when they form an unambiguous acy
 - Drag a single branch until its card touches another visible card. The prospective parent is highlighted; release while touching to attach the branch. Hold `Cmd` on macOS or `Ctrl` on Windows to move without attaching.
 - Reparenting replaces the branch's managed connector, so the old parent line is removed while unrelated cross-links remain.
 - Managed connectors choose opposing endpoints from the final card geometry, using the dominant horizontal or vertical direction for a direct path.
-- The node menu and hover controls provide layout, collapse, branch selection, duplication, coloring, and sibling-order actions.
+- The node menu provides independent pastel palettes for a node, its branch nodes, its incoming managed arrow, or all managed arrows in its branch. The Theme default action restores native Canvas styling; unrelated cross-links keep their existing colours.
 - Automatic height is enabled for text cards by default, with per-card manual opt-out.
 
 ## Source layout

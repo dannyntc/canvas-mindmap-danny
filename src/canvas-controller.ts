@@ -5,6 +5,8 @@ import {
 	CanvasNodeLike,
 	CanvasViewport,
 } from "./canvas-adapter";
+import { applyCanvasColors, branchColorTargets } from "./color-actions";
+import { PASTEL_COLORS } from "./colors";
 import { HeightController } from "./height-controller";
 import {
 	findContactParent,
@@ -108,6 +110,12 @@ interface HistoryBaseline {
 	beforeState: CanvasMindMapState;
 }
 
+interface ColorPaletteTarget {
+	label: string;
+	nodeIds: ReadonlySet<NodeId>;
+	edgeIds: ReadonlySet<string>;
+}
+
 function randomId(prefix: string, used: Set<string>): string {
 	let id = "";
 	while (!id || used.has(id)) {
@@ -153,6 +161,8 @@ export class CanvasController {
 	private arrangeControl?: HTMLButtonElement;
 	private readonly historyStates = new Map<string, CanvasMindMapState>();
 	private readonly height: HeightController;
+	private colorPalette?: HTMLElement;
+	private colorPaletteCleanup?: () => void;
 	private removeNativeDragHook?: () => void;
 	private removeDataImportHook?: () => void;
 	private historySyncTimer?: number;
@@ -709,7 +719,13 @@ export class CanvasController {
 		child: CanvasNodeData,
 	): CanvasEdgeData {
 		const sides = chooseStraightConnectorSides(parent, child);
-		return { id, fromNode: parent.id, toNode: child.id, ...sides };
+		return {
+			id,
+			fromNode: parent.id,
+			toNode: child.id,
+			...sides,
+			...(parent.color ? { color: parent.color } : {}),
+		};
 	}
 
 	private updateManagedConnectorSides(
@@ -1077,23 +1093,142 @@ export class CanvasController {
 		return branch.length > 0;
 	}
 
+	private applyColorTarget(
+		target: ColorPaletteTarget,
+		color: string | undefined,
+		label: string,
+	): boolean {
+		if (!this.state.enabled || (target.nodeIds.size === 0 && target.edgeIds.size === 0)) return false;
+		const transaction = this.adapter.transaction(label, (next) =>
+			applyCanvasColors(next, {
+				nodeIds: target.nodeIds,
+				edgeIds: target.edgeIds,
+				color,
+			}),
+		);
+		if (!transaction) return false;
+		this.adapter.requestFrame();
+		return true;
+	}
+
+	private targetColor(target: ColorPaletteTarget): string | undefined {
+		const data = this.adapter.getData();
+		const colors: Array<string | undefined> = [];
+		for (const node of data.nodes) if (target.nodeIds.has(node.id)) colors.push(node.color);
+		for (const edge of data.edges) if (target.edgeIds.has(edge.id)) colors.push(edge.color);
+		if (colors.length === 0) return undefined;
+		const first = colors[0];
+		return colors.every((color) => color === first) ? first : undefined;
+	}
+
+	private showColorPalette(nodeId: NodeId, target: ColorPaletteTarget): void {
+		this.closeColorPalette();
+		const doc = this.view.containerEl.ownerDocument;
+		const win = doc.defaultView ?? window;
+		const palette = doc.createElement("div");
+		palette.className = "canvas-mindmap-color-palette";
+		palette.setAttribute("role", "dialog");
+		palette.setAttribute("aria-label", target.label);
+
+		const heading = doc.createElement("div");
+		heading.className = "canvas-mindmap-color-palette-title";
+		heading.textContent = target.label;
+		palette.append(heading);
+
+		const swatches = doc.createElement("div");
+		swatches.className = "canvas-mindmap-color-swatches";
+		const currentColor = this.targetColor(target);
+		for (const pastel of PASTEL_COLORS) {
+			const button = doc.createElement("button");
+			button.type = "button";
+			button.className = "canvas-mindmap-color-swatch";
+			button.style.setProperty("--canvas-mindmap-swatch", pastel.hex);
+			button.setAttribute("aria-label", `${target.label}: ${pastel.label}`);
+			button.setAttribute("title", pastel.label);
+			button.setAttribute("aria-pressed", String(currentColor === pastel.hex));
+			if (currentColor === pastel.hex) button.classList.add("is-selected");
+			button.addEventListener("click", () => {
+				this.applyColorTarget(target, pastel.hex, `${target.label}: ${pastel.label}`);
+				this.closeColorPalette();
+			});
+			swatches.append(button);
+		}
+		palette.append(swatches);
+
+		const reset = doc.createElement("button");
+		reset.type = "button";
+		reset.className = "canvas-mindmap-color-reset";
+		reset.textContent = "Theme default";
+		reset.setAttribute("aria-label", `${target.label}: Theme default`);
+		reset.addEventListener("click", () => {
+			this.applyColorTarget(target, undefined, `${target.label}: Theme default`);
+			this.closeColorPalette();
+		});
+		palette.append(reset);
+
+		const host = doc.body ?? this.view.containerEl;
+		host.append(palette);
+		const anchor = this.adapter.node(nodeId)?.nodeEl ?? this.view.containerEl;
+		const rect = anchor.getBoundingClientRect?.();
+		const width = palette.offsetWidth || 220;
+		const height = palette.offsetHeight || 118;
+		const viewportWidth = win.innerWidth || width + 16;
+		const viewportHeight = win.innerHeight || height + 16;
+		const preferredLeft = rect ? rect.right + 8 : 16;
+		const preferredTop = rect ? rect.bottom + 8 : 16;
+		const left = Math.max(8, Math.min(preferredLeft, viewportWidth - width - 8));
+		const top = Math.max(8, Math.min(preferredTop, viewportHeight - height - 8));
+		palette.style.left = `${left}px`;
+		palette.style.top = `${top}px`;
+
+		const onOutsidePointerDown = (event: PointerEvent): void => {
+			if (!palette.contains(event.target as Node)) this.closeColorPalette();
+		};
+		const onKeyDown = (event: KeyboardEvent): void => {
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			event.stopPropagation();
+			this.closeColorPalette();
+		};
+		palette.addEventListener("pointerdown", (event) => event.stopPropagation());
+		doc.addEventListener("pointerdown", onOutsidePointerDown, true);
+		win.addEventListener("keydown", onKeyDown, true);
+		this.colorPalette = palette;
+		this.colorPaletteCleanup = () => {
+			doc.removeEventListener("pointerdown", onOutsidePointerDown, true);
+			win.removeEventListener("keydown", onKeyDown, true);
+			palette.remove();
+			if (this.colorPalette === palette) {
+				this.colorPalette = undefined;
+				this.colorPaletteCleanup = undefined;
+			}
+		};
+		swatches.querySelector<HTMLButtonElement>("button")?.focus();
+	}
+
+	private closeColorPalette(): void {
+		this.colorPaletteCleanup?.();
+		this.colorPalette?.remove();
+		this.colorPalette = undefined;
+		this.colorPaletteCleanup = undefined;
+	}
+
 	applyBranchColor(color?: string, nodeId?: NodeId): boolean {
 		const selected = nodeId ? [nodeId] : this.adapter.selectionIds();
 		if (selected.length === 0 || !this.state.enabled) return false;
 		const data = this.adapter.getData();
-		const nodeMap = new Map(data.nodes.map((node) => [node.id, node]));
-		const target = color ?? nodeMap.get(selected[0])?.color ?? "1";
-		const branches = new Set<NodeId>();
-		for (const id of selected) for (const branchId of descendants(this.state, id, true)) branches.add(branchId);
+		const nodeIds = new Set<NodeId>();
 		const edgeIds = new Set<string>();
-		for (const [childId, relation] of Object.entries(this.state.relations)) {
-			if (branches.has(childId)) edgeIds.add(relation.edgeId);
+		for (const id of selected) {
+			const targets = branchColorTargets(this.state, data, id);
+			for (const targetId of targets.nodeIds) nodeIds.add(targetId);
+			for (const edgeId of targets.edgeIds) edgeIds.add(edgeId);
 		}
-		const transaction = this.adapter.transaction("Apply branch color", (next) => {
-			for (const node of next.nodes) if (branches.has(node.id)) node.color = target;
-			for (const edge of next.edges) if (edgeIds.has(edge.id)) edge.color = target;
-		});
-		return !!transaction;
+		return this.applyColorTarget(
+			{ label: "Branch colours", nodeIds, edgeIds },
+			color,
+			"Apply branch colours",
+		);
 	}
 
 	duplicateSelectedBranch(nodeId?: NodeId): boolean {
@@ -1182,6 +1317,8 @@ export class CanvasController {
 				...(previousEdge ? cloneJson(previousEdge) : {}),
 				...this.createEdge(edgeId, parent, child),
 			};
+			if (previousEdge && previousEdge.color === undefined) delete edge.color;
+			else if (previousEdge?.color !== undefined) edge.color = previousEdge.color;
 			replaceManagedEdge(next, previous?.edgeId, edge);
 			if (plannedLayout) {
 				const visible = new Set(plannedLayout.visibleNodeIds);
@@ -1607,6 +1744,13 @@ export class CanvasController {
 
 	showNodeMenu(nodeId: NodeId, event?: MouseEvent): void {
 		if (!this.state.enabled) return;
+		const data = this.adapter.getData();
+		const branchTargets = branchColorTargets(this.state, data, nodeId);
+		const incomingEdgeIds = new Set<string>();
+		const incomingRelation = this.state.relations[nodeId];
+		if (incomingRelation && data.edges.some((edge) => edge.id === incomingRelation.edgeId)) {
+			incomingEdgeIds.add(incomingRelation.edgeId);
+		}
 		const menu = new Menu();
 		menu.addItem((item: any) => item.setTitle("Create child").setIcon("plus").onClick(() => this.createChild(nodeId)));
 		if (parentOf(this.state, nodeId)) {
@@ -1631,7 +1775,30 @@ export class CanvasController {
 		menu.addItem((item: any) => item.setTitle("Duplicate branch").setIcon("copy").onClick(() => this.duplicateSelectedBranch(nodeId)));
 		menu.addItem((item: any) => item.setTitle("Delete branch").setIcon("trash").onClick(() => this.deleteSelection([nodeId])));
 		menu.addItem((item: any) => item.setTitle("Layout this tree").setIcon("layout-dashboard").onClick(() => this.layoutTree(rootOf(this.state, nodeId))));
-		menu.addItem((item: any) => item.setTitle("Apply branch color").setIcon("palette").onClick(() => this.applyBranchColor(undefined, nodeId)));
+		menu.addItem((item: any) => item.setTitle("Node colour").setIcon("palette").onClick(() => this.showColorPalette(
+			nodeId,
+			{ label: "Node colour", nodeIds: new Set([nodeId]), edgeIds: new Set() },
+		)));
+		menu.addItem((item: any) => item.setTitle("Branch node colours").setIcon("palette").onClick(() => this.showColorPalette(
+			nodeId,
+			{ label: "Branch node colours", nodeIds: branchTargets.nodeIds, edgeIds: new Set() },
+		)));
+		menu.addItem((item: any) => {
+			item.setTitle("Incoming arrow colour").setIcon("palette");
+			item.setDisabled?.(incomingEdgeIds.size === 0);
+			return item.onClick(() => this.showColorPalette(
+				nodeId,
+				{ label: "Incoming arrow colour", nodeIds: new Set(), edgeIds: incomingEdgeIds },
+			));
+		});
+		menu.addItem((item: any) => {
+			item.setTitle("Branch arrow colours").setIcon("palette");
+			item.setDisabled?.(branchTargets.edgeIds.size === 0);
+			return item.onClick(() => this.showColorPalette(
+				nodeId,
+				{ label: "Branch arrow colours", nodeIds: new Set(), edgeIds: branchTargets.edgeIds },
+			));
+		});
 		if (this.adapter.node(nodeId)?.type === "text") {
 			menu.addItem((item: any) => item.setTitle("Toggle automatic height").setIcon("move-vertical").onClick(() => {
 				const manual = !this.state.manualHeightNodeIds.includes(nodeId);
@@ -1641,12 +1808,19 @@ export class CanvasController {
 				if (!manual) this.height.schedule(nodeId, true);
 			}));
 		}
-		if (event) menu.showAtMouseEvent(event);
+		if (event) {
+			menu.showAtMouseEvent(event);
+		} else {
+			const nodeElement = this.adapter.node(nodeId)?.nodeEl;
+			const rect = nodeElement?.getBoundingClientRect?.();
+			if (rect) menu.showAtPosition({ x: rect.right, y: rect.top });
+		}
 	}
 
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.closeColorPalette();
 		this.cancelPointerInteraction();
 		this.removeNativeDragHook?.();
 		this.removeNativeDragHook = undefined;
