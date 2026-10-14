@@ -5,7 +5,7 @@ import {
 	CanvasNodeLike,
 	CanvasViewport,
 } from "./canvas-adapter";
-import { applyCanvasColors, branchColorTargets } from "./color-actions";
+import { applyCanvasColors, branchColorTargets, colorControlTargets } from "./color-actions";
 import { PASTEL_COLORS } from "./colors";
 import { HeightController } from "./height-controller";
 import {
@@ -528,7 +528,8 @@ export class CanvasController {
 		this.removeControls();
 		if (!this.state.enabled) return;
 		const hidden = hiddenNodeIds(this.state);
-		const dataById = new Map(this.adapter.getData().nodes.map((node) => [node.id, node]));
+		const data = this.adapter.getData();
+		const dataById = new Map(data.nodes.map((node) => [node.id, node]));
 		const doc = this.view.containerEl.ownerDocument;
 		for (const node of this.adapter.nodes()) {
 			if (hidden.has(node.id) || !node.nodeEl || dataById.get(node.id)?.type === "group") continue;
@@ -556,19 +557,47 @@ export class CanvasController {
 			} else if (childCount > 0) {
 				controls.append(this.controlButton("Collapse descendants", "−", () => this.toggleCollapse(node.id)));
 			}
+			const directColorTargets = colorControlTargets(this.state, data, node.id);
+			controls.append(this.controlButton(
+				"Node colour",
+				"",
+				() => this.showColorPalette(node.id, {
+					label: "Node colour",
+					nodeIds: directColorTargets.nodeIds,
+					edgeIds: new Set(),
+				}, controls),
+				"palette",
+			));
+			if (directColorTargets.incomingEdgeIds.size > 0) {
+				controls.append(this.controlButton(
+					"Incoming arrow colour",
+					"",
+					() => this.showColorPalette(node.id, {
+						label: "Incoming arrow colour",
+						nodeIds: new Set(),
+						edgeIds: directColorTargets.incomingEdgeIds,
+					}, controls),
+					"palette",
+				));
+			}
 			node.nodeEl.append(controls);
 		}
 	}
 
-	private controlButton(label: string, text: string, callback: () => void): HTMLButtonElement {
+	private controlButton(label: string, text: string, callback: () => void, icon?: string): HTMLButtonElement {
 		const button = this.view.containerEl.ownerDocument.createElement("button");
 		button.type = "button";
 		button.className = "canvas-mindmap-control clickable-icon";
-		button.textContent = text;
+		if (icon) setIcon(button, icon);
+		else button.textContent = text;
 		button.setAttribute("aria-label", label);
 		setTooltip(button, label);
-		button.addEventListener("pointerdown", (event) => event.stopPropagation());
+		button.addEventListener("pointerdown", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+		});
 		button.addEventListener("click", (event) => {
+			event.preventDefault();
 			event.stopPropagation();
 			callback();
 		});
@@ -1099,14 +1128,30 @@ export class CanvasController {
 		label: string,
 	): boolean {
 		if (!this.state.enabled || (target.nodeIds.size === 0 && target.edgeIds.size === 0)) return false;
+		let changed = false;
 		const transaction = this.adapter.transaction(label, (next) =>
-			applyCanvasColors(next, {
+			changed = applyCanvasColors(next, {
 				nodeIds: target.nodeIds,
 				edgeIds: target.edgeIds,
 				color,
 			}),
+			(_before, _requested, after) => {
+				const nodes = new Map(after.nodes.map((node) => [node.id, node]));
+				const edges = new Map(after.edges.map((edge) => [edge.id, edge]));
+				for (const nodeId of target.nodeIds) {
+					if (nodes.get(nodeId)?.color !== color) return false;
+				}
+				for (const edgeId of target.edgeIds) {
+					if (edges.get(edgeId)?.color !== color) return false;
+				}
+				return true;
+			},
 		);
-		if (!transaction) return false;
+		if (!changed) return true;
+		if (!transaction) {
+			this.notify("Canvas did not accept that colour change. Check that this Canvas is writable and up to date.");
+			return false;
+		}
 		this.adapter.requestFrame();
 		return true;
 	}
@@ -1121,7 +1166,7 @@ export class CanvasController {
 		return colors.every((color) => color === first) ? first : undefined;
 	}
 
-	private showColorPalette(nodeId: NodeId, target: ColorPaletteTarget): void {
+	private showColorPalette(nodeId: NodeId, target: ColorPaletteTarget, anchorElement?: HTMLElement): void {
 		this.closeColorPalette();
 		const doc = this.view.containerEl.ownerDocument;
 		const win = doc.defaultView ?? window;
@@ -1147,9 +1192,12 @@ export class CanvasController {
 			button.setAttribute("title", pastel.label);
 			button.setAttribute("aria-pressed", String(currentColor === pastel.hex));
 			if (currentColor === pastel.hex) button.classList.add("is-selected");
-			button.addEventListener("click", () => {
-				this.applyColorTarget(target, pastel.hex, `${target.label}: ${pastel.label}`);
-				this.closeColorPalette();
+			button.addEventListener("click", (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				if (this.applyColorTarget(target, pastel.hex, `${target.label}: ${pastel.label}`)) {
+					this.closeColorPalette();
+				}
 			});
 			swatches.append(button);
 		}
@@ -1160,15 +1208,18 @@ export class CanvasController {
 		reset.className = "canvas-mindmap-color-reset";
 		reset.textContent = "Theme default";
 		reset.setAttribute("aria-label", `${target.label}: Theme default`);
-		reset.addEventListener("click", () => {
-			this.applyColorTarget(target, undefined, `${target.label}: Theme default`);
-			this.closeColorPalette();
+		reset.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (this.applyColorTarget(target, undefined, `${target.label}: Theme default`)) {
+				this.closeColorPalette();
+			}
 		});
 		palette.append(reset);
 
 		const host = doc.body ?? this.view.containerEl;
 		host.append(palette);
-		const anchor = this.adapter.node(nodeId)?.nodeEl ?? this.view.containerEl;
+		const anchor = anchorElement ?? this.adapter.node(nodeId)?.nodeEl ?? this.view.containerEl;
 		const rect = anchor.getBoundingClientRect?.();
 		const width = palette.offsetWidth || 220;
 		const height = palette.offsetHeight || 118;
@@ -1813,7 +1864,9 @@ export class CanvasController {
 		} else {
 			const nodeElement = this.adapter.node(nodeId)?.nodeEl;
 			const rect = nodeElement?.getBoundingClientRect?.();
-			if (rect) menu.showAtPosition({ x: rect.right, y: rect.top });
+			menu.showAtPosition(rect
+				? { x: rect.right, y: rect.top }
+				: { x: 24, y: 24 });
 		}
 	}
 

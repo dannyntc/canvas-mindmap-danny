@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyCanvasColors, branchColorTargets } from "../src/color-actions";
+import { applyCanvasColors, branchColorTargets, colorControlTargets } from "../src/color-actions";
 import { PASTEL_COLORS } from "../src/colors";
 import { attachChild } from "../src/tree-model";
 import { CanvasData, defaultCanvasState } from "../src/types";
@@ -87,4 +87,12 @@ test("clearing colours removes only the targeted Canvas fields", () => {
 	assert.equal(data.nodes.find((item) => item.id === "child")?.color, undefined);
 	assert.equal(data.edges.find((item) => item.id === "edge-root-child")?.color, undefined);
 	assert.equal(data.edges.find((item) => item.id === "cross-link")?.color, "#cross-link");
+});
+
+test("colour controls expose the selected node and its managed incoming arrow", () => {
+	const { data, state } = branchFixture();
+	const targets = colorControlTargets(state, data, "child");
+
+	assert.deepEqual([...targets.nodeIds], ["child"]);
+	assert.deepEqual([...targets.incomingEdgeIds], ["edge-root-child"]);
 });

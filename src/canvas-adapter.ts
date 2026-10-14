@@ -389,6 +389,7 @@ export class CanvasAdapter {
 	transaction(
 		label: string,
 		mutator: (data: CanvasData) => boolean | void,
+		verify?: (beforeData: CanvasData, requestedData: CanvasData, afterData: CanvasData) => boolean,
 	): AdapterTransaction | undefined {
 		if (!this.capabilities.available || this.capabilities.readOnly) return undefined;
 		const beforeData = this.getData();
@@ -396,10 +397,16 @@ export class CanvasAdapter {
 		const nextData = cloneJson(beforeData);
 		const result = mutator(nextData);
 		if (result === false || !this.writeData(nextData)) return undefined;
+		const afterData = this.getData();
+		const changed = JSON.stringify(beforeData) !== JSON.stringify(afterData);
+		if (!changed || (verify && !verify(beforeData, nextData, afterData))) {
+			if (changed) this.writeData(beforeData);
+			return undefined;
+		}
 		const transaction: AdapterTransaction = {
 			label,
 			beforeData,
-			afterData: this.getData(),
+			afterData,
 			beforeSelection,
 			afterSelection: this.selectionIds(),
 		};

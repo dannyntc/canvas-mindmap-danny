@@ -54,6 +54,54 @@ test("writeData asks Canvas importData to remove missing live objects", () => {
 	assert.equal(removeMissing, true);
 });
 
+test("transaction rejects a Canvas import that does not persist the requested colour", () => {
+	const originalData: CanvasData = {
+		nodes: [{ id: "node", x: 0, y: 0, width: 100, height: 60, type: "text", text: "Node" }],
+		edges: [],
+	};
+	const target = canvas({
+		getData: () => originalData,
+		importData: function () {
+			// Simulate a runtime that accepts importData but does not apply it.
+		},
+	});
+	const adapter = new CanvasAdapter(target);
+
+	const transaction = adapter.transaction("Set node colour", (data) => {
+		data.nodes[0].color = "#F4B6C2";
+	});
+
+	assert.equal(transaction, undefined);
+});
+
+test("transaction verification can reject a partially applied Canvas snapshot", () => {
+	let storedData: CanvasData = {
+		nodes: [{ id: "node", x: 0, y: 0, width: 100, height: 60, type: "text", text: "Node" }],
+		edges: [],
+	};
+	const target = canvas({
+		getData: () => storedData,
+		importData: (data) => {
+			storedData = {
+				...data,
+				nodes: data.nodes.map(({ color: _color, ...node }) => node),
+			};
+		},
+	});
+	const adapter = new CanvasAdapter(target);
+
+	const transaction = adapter.transaction(
+		"Set node colour",
+		(data) => {
+			data.nodes[0].color = "#F4B6C2";
+		},
+		(_before, _requested, after) => after.nodes[0]?.color === "#F4B6C2",
+	);
+
+	assert.equal(transaction, undefined);
+	assert.equal(storedData.nodes[0]?.color, undefined);
+});
+
 test("selection-drag observer preserves native receiver and callback order", () => {
 	const events: string[] = [];
 	let nativeReceiver: CanvasLike | undefined;

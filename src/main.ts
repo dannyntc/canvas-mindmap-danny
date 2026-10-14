@@ -67,7 +67,7 @@ const DEFAULT_LEGACY_SETTINGS: LegacySettings = {
 	advanced: {
 		transferToCommands: false,
 		showChangelogAutomatically: true,
-		lastUpdatedVersion: "1.1.5",
+		lastUpdatedVersion: "1.1.6",
 	},
 };
 
@@ -288,12 +288,12 @@ export default class CanvasMindMapPlugin extends Plugin {
 		this.addCommand({
 			id: "open-changelog",
 			name: "Open Canvas Mindmap changelog",
-			callback: () => new Notice("Canvas Mindmap 1.1.5 adds independent pastel node and arrow colours."),
+			callback: () => new Notice("Canvas Mindmap 1.1.6 adds direct pastel node and arrow colour controls."),
 		});
 	}
 
 	async saveSettings(): Promise<void> {
-		this.settings.advanced.lastUpdatedVersion = "1.1.5";
+		this.settings.advanced.lastUpdatedVersion = "1.1.6";
 		const current = this.store.snapshot();
 		await this.saveData({ ...this.settings, ...current });
 	}
