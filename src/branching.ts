@@ -149,6 +149,11 @@ function safeColor(color: string | undefined): string {
 	return "#8b8f98";
 }
 
+function branchLabel(state: CanvasMindMapState | undefined, group: BranchingGroup): string | undefined {
+	const label = state?.branchLabels?.[group.parentId]?.[group.side];
+	return typeof label === "string" && label.trim() ? label.trim() : undefined;
+}
+
 function svgElement<K extends keyof SVGElementTagNameMap>(
 	document: Document,
 	tag: K,
@@ -271,6 +276,10 @@ export class BranchingOverlay {
 		this.previewRatios.delete(junctionId);
 	}
 
+	isMounted(): boolean {
+		return this.svg.parentElement === this.wrapper;
+	}
+
 	private rerenderCurrent(): void {
 		if (!this.currentData || !this.currentState) return;
 		this.update(this.currentData, this.currentState, this.currentHidden, this.getNodeElement ?? (() => undefined));
@@ -314,6 +323,28 @@ export class BranchingOverlay {
 			circle.dataset.branchingJunction = "true";
 			circle.style.pointerEvents = this.callbacks.canEdit() ? "all" : "none";
 			this.svg.appendChild(circle);
+		}
+		const label = branchLabel(this.currentState, group);
+		const firstJunction = group.junctions[0];
+		const firstJunctionPoint = firstJunction ? group.junctionPoints.get(firstJunction.id) : undefined;
+		if (label && firstJunctionPoint) {
+			const labelPoint = lerp(group.anchor.source, firstJunctionPoint, 0.5);
+			const text = svgElement(document, "text");
+			text.textContent = label;
+			text.setAttribute("x", String(labelPoint.x));
+			text.setAttribute("y", String(labelPoint.y));
+			text.setAttribute("text-anchor", "middle");
+			text.setAttribute("dominant-baseline", "middle");
+			text.dataset.branchingLabel = "true";
+			text.style.fill = "var(--text-normal)";
+			text.style.fontSize = "var(--font-ui-small)";
+			text.style.fontWeight = "600";
+			text.style.paintOrder = "stroke";
+			text.style.stroke = "var(--background-primary)";
+			text.style.strokeLinejoin = "round";
+			text.style.strokeWidth = "6px";
+			text.style.pointerEvents = "none";
+			this.svg.appendChild(text);
 		}
 		const junctionsByEdge = new Map<EdgeId, BranchJunction[]>();
 		for (const junction of group.junctions) {

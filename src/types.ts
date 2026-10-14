@@ -73,6 +73,7 @@ export interface CanvasMindMapState {
 	trees: Record<NodeId, TreePreferences>;
 	relations: Record<NodeId, ParentRelation>;
 	junctions: Record<string, BranchJunction>;
+	branchLabels: Record<NodeId, Partial<Record<CanvasSide, string>>>;
 	collapsedNodeIds: NodeId[];
 	manualHeightNodeIds: NodeId[];
 }
@@ -124,6 +125,7 @@ export function defaultCanvasState(
 		trees: {},
 		relations: {},
 		junctions: {},
+		branchLabels: {},
 		collapsedNodeIds: [],
 		manualHeightNodeIds: [],
 	};

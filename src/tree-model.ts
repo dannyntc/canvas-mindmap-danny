@@ -276,6 +276,7 @@ export function applyBranchDeletion(
 		delete state.relations[nodeId];
 		delete state.trees[nodeId];
 		delete state.trees[rootOf(state, nodeId)];
+		delete state.branchLabels[nodeId];
 	}
 	state.collapsedNodeIds = state.collapsedNodeIds.filter(
 		(nodeId) => !deletion.nodeIds.has(nodeId),
@@ -331,6 +332,7 @@ export function sanitizeState(
 	state.trees ??= {};
 	state.relations ??= {};
 	state.junctions ??= {};
+	state.branchLabels ??= {};
 	state.collapsedNodeIds ??= [];
 	state.manualHeightNodeIds ??= [];
 	const nodes = nodeMap(data);
@@ -372,6 +374,16 @@ export function sanitizeState(
 		};
 	}
 	state.junctions = junctions;
+	const branchLabels: CanvasMindMapState["branchLabels"] = {};
+	for (const [parentId, labels] of Object.entries(state.branchLabels)) {
+		if (!existingIds.has(parentId) || !labels || typeof labels !== "object") continue;
+		const cleanLabels: Partial<Record<"top" | "bottom" | "left" | "right", string>> = {};
+		for (const side of ["top", "bottom", "left", "right"] as const) {
+			if (typeof labels[side] === "string" && labels[side].trim()) cleanLabels[side] = labels[side];
+		}
+		if (Object.keys(cleanLabels).length > 0) branchLabels[parentId] = cleanLabels;
+	}
+	state.branchLabels = branchLabels;
 	state.collapsedNodeIds = [...new Set(state.collapsedNodeIds)].filter((id) =>
 		existingIds.has(id),
 	);
@@ -526,6 +538,12 @@ export function duplicateBranch(
 			anchorEdgeId,
 			edgeIds: remappedEdgeIds,
 		};
+	}
+	nextState.branchLabels = {};
+	for (const [oldParentId, labels] of Object.entries(state.branchLabels)) {
+		const newParentId = oldToNew.get(oldParentId);
+		if (!newParentId) continue;
+		nextState.branchLabels[newParentId] = cloneJson(labels);
 	}
 	return { state: nextState, nodes, edges, rootId: newRoot, oldToNew };
 }

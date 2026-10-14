@@ -177,6 +177,8 @@ test("sanitizeState removes stale references, cycles, and non-root preferences",
 test("sanitizeState keeps valid junctions and drops stale branch targets", () => {
 	const data = treeData();
 	const state = stateWithRelations();
+	state.branchLabels.a = { right: "shared", top: "" };
+	state.branchLabels.missing = { right: "discard" };
 	state.junctions.valid = {
 		id: "valid",
 		parentId: "a",
@@ -197,4 +199,6 @@ test("sanitizeState keeps valid junctions and drops stale branch targets", () =>
 	const clean = sanitizeState(data, state);
 	assert.deepEqual(clean.junctions.valid.edgeIds, ["e-ab"]);
 	assert.equal(clean.junctions.stale, undefined);
+	assert.deepEqual(clean.branchLabels.a, { right: "shared" });
+	assert.equal(clean.branchLabels.missing, undefined);
 });

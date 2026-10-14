@@ -427,6 +427,21 @@ export class CanvasController {
 		this.refreshRuntime();
 	}
 
+	refreshCanvasLifecycle(): void {
+		if (this.disposed) return;
+		const nextKeyTarget = this.adapter.canvas.wrapperEl ?? this.view.containerEl;
+		if (nextKeyTarget !== this.keyTarget) {
+			this.keyTarget?.removeEventListener("keydown", this.onKeyDown, true);
+			this.keyTarget?.removeEventListener("pointerdown", this.onPointerDown, true);
+			this.keyTarget = nextKeyTarget;
+			this.keyTarget.addEventListener("keydown", this.onKeyDown, true);
+			this.keyTarget.addEventListener("pointerdown", this.onPointerDown, true);
+			this.domObserver?.disconnect();
+			this.observeCanvasDom();
+		}
+		this.refreshRuntime();
+	}
+
 	getState(): CanvasMindMapState {
 		return cloneJson(this.state);
 	}
@@ -488,16 +503,21 @@ export class CanvasController {
 	}
 
 	private refreshBranchingOverlay(): void {
+		const wrapper = this.adapter.canvas.wrapperEl;
 		if (this.disposed || !this.state.enabled || !this.state.branchingEnabled ||
-			!this.adapter.capabilities.available || !this.adapter.canvas.wrapperEl) {
+			!this.adapter.capabilities.available || !wrapper) {
 			this.removeBranchingOverlay();
 			if (!this.disposed && this.state.enabled && this.adapter.capabilities.available) {
 				this.syncNativeEdgeVisibility(this.adapter.getData(), hiddenNodeIds(this.state));
 			}
 			return;
 		}
+		if (this.branchingOverlay && !this.branchingOverlay.isMounted()) {
+			this.branchingOverlay.dispose();
+			this.branchingOverlay = undefined;
+		}
 		if (!this.branchingOverlay) {
-			this.branchingOverlay = new BranchingOverlay(this.adapter.canvas.wrapperEl, {
+			this.branchingOverlay = new BranchingOverlay(wrapper, {
 				canEdit: () => !this.adapter.capabilities.readOnly && this.state.enabled && this.state.branchingEnabled,
 				getNodeIdAt: (clientX, clientY) => this.nodeIdAtPoint(clientX, clientY),
 				onJunctionPreview: () => undefined,
@@ -660,10 +680,49 @@ export class CanvasController {
 	private showBranchPathMenu(edgeId: EdgeId, ratio: number, event: MouseEvent): void {
 		const relation = Object.entries(this.state.relations).find(([, candidate]) => candidate.edgeId === edgeId);
 		if (!relation) return;
+		const edge = this.adapter.getData().edges.find((candidate) => candidate.id === edgeId);
+		const group = edge && managedBranchGroups(this.adapter.getData(), this.state).find((candidate) =>
+			candidate.edges.some((candidateEdge) => candidateEdge.id === edge.id),
+		);
 		const menu = new Menu();
 		menu.addItem((item: any) => item.setTitle("Add branching junction here").setIcon("git-branch").onClick(() => this.addJunction(edgeId, ratio)));
 		menu.addItem((item: any) => item.setTitle("Create child here").setIcon("plus").onClick(() => this.createChildFromBranchPath(edgeId, ratio)));
+		if (group && (group.edges.length > 1 || group.junctions.length > 0)) {
+			const currentLabel = this.state.branchLabels[group.parentId]?.[group.side] ?? "";
+			menu.addItem((item: any) => item
+				.setTitle(currentLabel ? "Edit common branch label" : "Set common branch label")
+				.setIcon("text")
+				.onClick(() => this.editBranchLabel(group.parentId, group.side)));
+			if (currentLabel) {
+				menu.addItem((item: any) => item.setTitle("Clear common branch label").setIcon("x").onClick(() => this.clearBranchLabel(group.parentId, group.side)));
+			}
+		}
 		menu.showAtMouseEvent(event);
+	}
+
+	private editBranchLabel(parentId: NodeId, side: CanvasSide): boolean {
+		const current = this.state.branchLabels[parentId]?.[side] ?? "";
+		const nextLabel = this.win.prompt("Common shared-branch label", current);
+		if (nextLabel === null) return false;
+		const label = nextLabel.trim();
+		const nextState = cloneJson(this.state);
+		nextState.branchLabels[parentId] ??= {};
+		if (label) nextState.branchLabels[parentId][side] = label;
+		else delete nextState.branchLabels[parentId][side];
+		if (Object.keys(nextState.branchLabels[parentId]).length === 0) delete nextState.branchLabels[parentId];
+		this.state = nextState;
+		this.commitState();
+		return true;
+	}
+
+	private clearBranchLabel(parentId: NodeId, side: CanvasSide): boolean {
+		if (!this.state.branchLabels[parentId]?.[side]) return false;
+		const nextState = cloneJson(this.state);
+		delete nextState.branchLabels[parentId][side];
+		if (Object.keys(nextState.branchLabels[parentId]).length === 0) delete nextState.branchLabels[parentId];
+		this.state = nextState;
+		this.commitState();
+		return true;
 	}
 
 	private createChildFromBranchPath(edgeId: EdgeId, ratio: number): boolean {
@@ -686,6 +745,14 @@ export class CanvasController {
 			item.setDisabled?.(junctionId.startsWith("auto:"));
 			return item.onClick(() => this.resetJunction(junctionId));
 		});
+		const currentLabel = this.state.branchLabels[group.parentId]?.[group.side] ?? "";
+		menu.addItem((item: any) => item
+			.setTitle(currentLabel ? "Edit common branch label" : "Set common branch label")
+			.setIcon("text")
+			.onClick(() => this.editBranchLabel(group.parentId, group.side)));
+		if (currentLabel) {
+			menu.addItem((item: any) => item.setTitle("Clear common branch label").setIcon("x").onClick(() => this.clearBranchLabel(group.parentId, group.side)));
+		}
 		if (!junctionId.startsWith("auto:")) {
 			menu.addItem((item: any) => item.setTitle("Remove junction").setIcon("unlink").onClick(() => this.removeJunction(junctionId)));
 		}

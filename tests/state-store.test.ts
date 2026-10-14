@@ -50,6 +50,7 @@ test("migration keeps the branching option and clamps saved junction positions",
 		mindMaps: {
 			"branching.canvas": {
 				branchingEnabled: false,
+				branchLabels: { root: { right: "shared context" } },
 				junctions: {
 					manual: {
 						parentId: "root",
@@ -64,5 +65,6 @@ test("migration keeps the branching option and clamps saved junction positions",
 	});
 	const state = migrated.mindMaps["branching.canvas"];
 	assert.equal(state.branchingEnabled, false);
+	assert.equal(state.branchLabels.root.right, "shared context");
 	assert.equal(state.junctions.manual.ratio, 0.95);
 });

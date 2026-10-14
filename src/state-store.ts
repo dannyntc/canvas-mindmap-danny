@@ -1,6 +1,7 @@
 import {
 	CanvasData,
 	CanvasMindMapState,
+	CanvasSide,
 	LayoutMode,
 	PersistedPluginData,
 	cloneJson,
@@ -114,6 +115,16 @@ export function normalizeCanvasState(
 				ratio: Math.min(0.95, Math.max(0.05, ratio)),
 				edgeIds: rawJunction.edgeIds.filter((id): id is string => typeof id === "string"),
 			};
+		}
+	}
+	if (isRecord(raw.branchLabels)) {
+		for (const [parentId, rawLabels] of Object.entries(raw.branchLabels)) {
+			if (!isRecord(rawLabels)) continue;
+			const labels: Partial<Record<CanvasSide, string>> = {};
+			for (const side of ["top", "bottom", "left", "right"] as const) {
+				if (typeof rawLabels[side] === "string") labels[side] = rawLabels[side] as string;
+			}
+			if (Object.keys(labels).length > 0) state.branchLabels[parentId] = labels;
 		}
 	}
 	if (Array.isArray(raw.collapsedNodeIds)) {

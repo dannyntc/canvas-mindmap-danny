@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { branchGroupKey, managedBranchGroups, projectRatio } from "../src/branching";
+import { BranchingOverlay, branchGroupKey, managedBranchGroups, projectRatio } from "../src/branching";
 import { CanvasData, defaultCanvasState } from "../src/types";
 import { attachChild } from "../src/tree-model";
 
@@ -53,4 +53,37 @@ test("manual junctions are scoped to their parent and selected outgoing edges", 
 
 	const groups = managedBranchGroups(canvas, state);
 	assert.deepEqual(groups[0].junctions[0].edgeIds, ["edge-a"]);
+});
+
+test("branching overlay renders one persisted label on the shared trunk", async () => {
+	const { Window } = await import("happy-dom");
+	const window = new Window();
+	const wrapper = window.document.createElement("div") as unknown as HTMLElement;
+	const root = window.document.createElement("div") as unknown as HTMLElement;
+	const first = window.document.createElement("div") as unknown as HTMLElement;
+	const second = window.document.createElement("div") as unknown as HTMLElement;
+	const rect = (left: number, top: number, right: number, bottom: number) => ({ left, top, right, bottom });
+	Object.defineProperty(wrapper, "getBoundingClientRect", { value: () => rect(0, 0, 1000, 1000) });
+	Object.defineProperty(root, "getBoundingClientRect", { value: () => rect(0, 0, 100, 60) });
+	Object.defineProperty(first, "getBoundingClientRect", { value: () => rect(300, 0, 400, 60) });
+	Object.defineProperty(second, "getBoundingClientRect", { value: () => rect(300, 100, 400, 160) });
+	const nodes = new Map<string, HTMLElement>([["root", root], ["a", first], ["b", second]]);
+	const canvas = data();
+	const state = defaultCanvasState();
+	attachChild(state, "a", "root", "edge-a", 0);
+	attachChild(state, "b", "root", "edge-b", 1);
+	state.branchLabels.root = { right: "shared context" };
+	const overlay = new BranchingOverlay(wrapper, {
+		canEdit: () => false,
+		getNodeIdAt: () => undefined,
+		onJunctionPreview: () => undefined,
+		onJunctionCommit: () => undefined,
+		onConnect: () => undefined,
+		onPathContextMenu: () => undefined,
+		onJunctionContextMenu: () => undefined,
+	});
+	const rendered = overlay.update(canvas, state, new Set(), (nodeId) => nodes.get(nodeId));
+	assert.deepEqual([...rendered].sort(), ["edge-a", "edge-b"]);
+	assert.equal(wrapper.querySelector("[data-branching-label]")?.textContent, "shared context");
+	overlay.dispose();
 });
