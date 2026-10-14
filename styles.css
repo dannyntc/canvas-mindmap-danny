@@ -222,3 +222,29 @@
     white-space: nowrap;
     z-index: 20;
 }
+
+.canvas-mindmap-branching-overlay {
+    overflow: visible;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.canvas-mindmap-branching-overlay [data-branching-path] {
+    cursor: context-menu;
+    opacity: 0.96;
+    pointer-events: stroke;
+}
+
+.canvas-mindmap-branching-overlay [data-branching-path]:hover {
+    opacity: 1;
+    stroke-width: 4;
+}
+
+.canvas-mindmap-branching-overlay [data-branching-junction] {
+    cursor: grab;
+    pointer-events: all;
+}
+
+.canvas-mindmap-branching-overlay [data-branching-junction]:active {
+    cursor: grabbing;
+}

@@ -44,3 +44,25 @@ test("state snapshots are defensive copies", () => {
 	(snapshot.mindMaps["copy.canvas"] as any).enabled = false;
 	assert.equal(store.get("copy.canvas").enabled, true);
 });
+
+test("migration keeps the branching option and clamps saved junction positions", () => {
+	const migrated = migratePluginData({
+		mindMaps: {
+			"branching.canvas": {
+				branchingEnabled: false,
+				junctions: {
+					manual: {
+						parentId: "root",
+						anchorEdgeId: "edge",
+						side: "right",
+						ratio: 3,
+						edgeIds: ["edge"],
+					},
+				},
+			},
+		},
+	});
+	const state = migrated.mindMaps["branching.canvas"];
+	assert.equal(state.branchingEnabled, false);
+	assert.equal(state.junctions.manual.ratio, 0.95);
+});

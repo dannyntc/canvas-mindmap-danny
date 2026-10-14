@@ -33,6 +33,7 @@ interface LegacySettings {
 		autoLayout: boolean;
 		autoLayoutDirection: string;
 		autoHeight: boolean;
+		branchingEnabled: boolean;
 		ignoreFilesRegex: string;
 	};
 	resize: { autoResize: boolean; widthAutoResize: boolean; maxWidth: number };
@@ -61,13 +62,14 @@ const DEFAULT_LEGACY_SETTINGS: LegacySettings = {
 		autoLayout: true,
 		autoLayoutDirection: "LR",
 		autoHeight: true,
+		branchingEnabled: true,
 		ignoreFilesRegex: "",
 	},
 	resize: { autoResize: false, widthAutoResize: false, maxWidth: 500 },
 	advanced: {
 		transferToCommands: false,
 		showChangelogAutomatically: true,
-	lastUpdatedVersion: "1.1.17",
+		lastUpdatedVersion: "1.1.18",
 	},
 };
 
@@ -180,6 +182,7 @@ export default class CanvasMindMapPlugin extends Plugin {
 				...state,
 				autoLayout: this.settings.layout.autoLayout,
 				autoHeight: this.settings.layout.autoHeight,
+				branchingEnabled: this.settings.layout.branchingEnabled,
 				defaultLayout: "balanced",
 			};
 			this.store.set(path, state);
@@ -229,6 +232,10 @@ export default class CanvasMindMapPlugin extends Plugin {
 		const plugins = this.app.plugins;
 		return !!plugins?.enabledPlugins?.has?.("node-auto-resize") ||
 			!!plugins?.enabledPlugins?.has?.("obsidian-node-auto-resize");
+	}
+
+	setBranchingEnabledForOpenCanvases(enabled: boolean): void {
+		for (const controller of this.controllers.values()) controller.setBranchingEnabled(enabled);
 	}
 
 	private activeController(): CanvasController | undefined {
@@ -288,12 +295,12 @@ export default class CanvasMindMapPlugin extends Plugin {
 		this.addCommand({
 			id: "open-changelog",
 			name: "Open Canvas Mindmap changelog",
-			callback: () => new Notice("Canvas Mindmap 1.1.17 ignores Shift+ArrowUp/Down so selected cards do not shift."),
+			callback: () => new Notice("Canvas Mindmap 1.1.18 adds shared branching arrows with movable junctions."),
 		});
 	}
 
 	async saveSettings(): Promise<void> {
-		this.settings.advanced.lastUpdatedVersion = "1.1.17";
+		this.settings.advanced.lastUpdatedVersion = "1.1.18";
 		const current = this.store.snapshot();
 		await this.saveData({ ...this.settings, ...current });
 	}
@@ -351,6 +358,16 @@ class CanvasMindMapSettingTab extends PluginSettingTab {
 				.setValue(this.pluginRef.settings.layout.autoHeight)
 				.onChange(async (value: boolean) => {
 					this.pluginRef.settings.layout.autoHeight = value;
+					await this.pluginRef.saveSettings();
+				}));
+		new Setting(container)
+			.setName("Shared branching arrows")
+			.setDesc("Use junctions when a mind-map card has multiple child arrows. Junction positions can be adjusted on the Canvas.")
+			.addToggle((toggle: any) => toggle
+				.setValue(this.pluginRef.settings.layout.branchingEnabled)
+				.onChange(async (value: boolean) => {
+					this.pluginRef.settings.layout.branchingEnabled = value;
+					this.pluginRef.setBranchingEnabledForOpenCanvases(value);
 					await this.pluginRef.saveSettings();
 				}));
 		new Setting(container)

@@ -61,6 +61,7 @@ export function normalizeCanvasState(
 	state.enabled = true;
 	state.autoLayout = raw.autoLayout !== false;
 	state.autoHeight = raw.autoHeight !== false;
+	state.branchingEnabled = raw.branchingEnabled !== false;
 	state.defaultLayout = normalizeLayout(raw.defaultLayout, defaultLayout);
 	if (isRecord(raw.trees)) {
 		for (const [rootId, rawPreference] of Object.entries(raw.trees)) {
@@ -87,6 +88,31 @@ export function normalizeCanvasState(
 				parentId: rawRelation.parentId,
 				edgeId: rawRelation.edgeId,
 				order: Number(rawRelation.order) || 0,
+			};
+		}
+	}
+	if (isRecord(raw.junctions)) {
+		for (const [junctionId, rawJunction] of Object.entries(raw.junctions)) {
+			if (!isRecord(rawJunction)) continue;
+			if (typeof rawJunction.parentId !== "string" ||
+				typeof rawJunction.anchorEdgeId !== "string" ||
+				typeof rawJunction.side !== "string" ||
+				!Array.isArray(rawJunction.edgeIds)) continue;
+			if (![
+				"top",
+				"bottom",
+				"left",
+				"right",
+			].includes(rawJunction.side)) continue;
+			const ratio = Number(rawJunction.ratio);
+			if (!Number.isFinite(ratio)) continue;
+			state.junctions[junctionId] = {
+				id: junctionId,
+				parentId: rawJunction.parentId,
+				anchorEdgeId: rawJunction.anchorEdgeId,
+				side: rawJunction.side as "top" | "bottom" | "left" | "right",
+				ratio: Math.min(0.95, Math.max(0.05, ratio)),
+				edgeIds: rawJunction.edgeIds.filter((id): id is string => typeof id === "string"),
 			};
 		}
 	}

@@ -1,4 +1,4 @@
-# Canvas-Mindmap-Danny 1.1.16
+# Canvas-Mindmap-Danny 1.1.18
 
 Canvas-Mindmap-Danny is an Obsidian desktop plugin maintained by Danny and based on the original Canvas Mindmap work by Boninall. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
 
@@ -37,6 +37,7 @@ Existing directed connections are adopted only when they form an unambiguous acy
 - When Auto layout is enabled, dragging or creating cards makes nearby cards and their branches move aside in real time, maintaining a 48px clearance. The space-making preview is recalculated from the original positions, so cards return when the path clears. Hold over a prospective parent for about half a second before releasing to attach; ordinary contact only makes space.
 - Reparenting replaces the branch's managed connector, so the old parent line is removed while unrelated cross-links remain.
 - Managed connectors choose opposing endpoints from the final card geometry, using the dominant horizontal or vertical direction for a direct path.
+- Shared branching arrows are enabled by default for managed mind-map connections. When one card has multiple child arrows on the same side, they share a visible junction. Right-click a managed arrow to add a junction or create a child there; drag a junction along its arrow to adjust the split, drag it onto an existing card to reparent that branch, and use its context menu to reset or remove it. The **Shared branching arrows** setting and the node menu toggle control the feature.
 - The node menu provides independent pastel palettes for a node, its branch nodes, its incoming managed arrow, or all managed arrows in its branch. The Theme default action restores native Canvas styling; unrelated cross-links keep their existing colours.
 - The native palette icon above a selected card or selection includes the same pastel colours. Native custom-colour input remains available, and the picker remains usable with mouse or keyboard input.
 - Cards do not display plugin controls when hovered; use the node menu or keyboard shortcuts for mind-map actions.
@@ -47,6 +48,7 @@ Existing directed connections are adopted only when they form an unambiguous acy
 - `src/tree-model.ts` — pure tree validation, adoption, traversal, branch operations, and duplication.
 - `src/layout.ts` — pure variable-size directional and balanced layout.
 - `src/space-making.ts` — pure real-time collision resolution and branch grouping.
+- `src/branching.ts` — branching-junction grouping, SVG routing, and pointer interaction.
 - `src/state-store.ts` — versioned per-Canvas metadata migration and cleanup.
 - `src/canvas-adapter.ts` — the private Canvas capability boundary and transaction wrapper.
 - `src/color-palette.ts` — floating pastel palette lifecycle and pointer/keyboard interaction.

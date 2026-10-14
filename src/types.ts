@@ -12,6 +12,15 @@ export type BranchSide = "left" | "right";
 export type CanvasNodeType = "text" | "file" | "link" | "group" | string;
 export type CanvasSide = "top" | "bottom" | "left" | "right";
 
+export interface BranchJunction {
+	id: string;
+	parentId: NodeId;
+	anchorEdgeId: EdgeId;
+	side: CanvasSide;
+	ratio: number;
+	edgeIds: EdgeId[];
+}
+
 export interface CanvasNodeData {
 	id: NodeId;
 	x: number;
@@ -59,9 +68,11 @@ export interface CanvasMindMapState {
 	enabled: boolean;
 	autoLayout: boolean;
 	autoHeight: boolean;
+	branchingEnabled: boolean;
 	defaultLayout: LayoutMode;
 	trees: Record<NodeId, TreePreferences>;
 	relations: Record<NodeId, ParentRelation>;
+	junctions: Record<string, BranchJunction>;
 	collapsedNodeIds: NodeId[];
 	manualHeightNodeIds: NodeId[];
 }
@@ -108,9 +119,11 @@ export function defaultCanvasState(
 		enabled: true,
 		autoLayout: true,
 		autoHeight: true,
+		branchingEnabled: true,
 		defaultLayout,
 		trees: {},
 		relations: {},
+		junctions: {},
 		collapsedNodeIds: [],
 		manualHeightNodeIds: [],
 	};

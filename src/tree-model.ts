@@ -288,6 +288,16 @@ export function applyBranchDeletion(
 			delete state.relations[childId];
 		}
 	}
+	for (const [junctionId, junction] of Object.entries(state.junctions)) {
+		if (deletion.nodeIds.has(junction.parentId)) {
+			delete state.junctions[junctionId];
+			continue;
+		}
+		junction.edgeIds = junction.edgeIds.filter((edgeId) => !deletion.edgeIds.has(edgeId));
+		if (deletion.edgeIds.has(junction.anchorEdgeId) || junction.edgeIds.length === 0) {
+			delete state.junctions[junctionId];
+		}
+	}
 }
 
 function relationIsValid(
@@ -320,6 +330,7 @@ export function sanitizeState(
 	state.defaultLayout = state.defaultLayout ?? defaultLayout;
 	state.trees ??= {};
 	state.relations ??= {};
+	state.junctions ??= {};
 	state.collapsedNodeIds ??= [];
 	state.manualHeightNodeIds ??= [];
 	const nodes = nodeMap(data);
@@ -335,6 +346,32 @@ export function sanitizeState(
 	}
 	state.relations = clean;
 	const existingIds = new Set(nodes.keys());
+	const managedEdges = new Map<string, CanvasEdgeData>();
+	for (const relation of Object.values(state.relations)) {
+		const edge = edges.get(relation.edgeId);
+		if (edge) managedEdges.set(edge.id, edge);
+	}
+	const junctions: CanvasMindMapState["junctions"] = {};
+	for (const [junctionId, junction] of Object.entries(state.junctions)) {
+		if (!junction || !existingIds.has(junction.parentId)) continue;
+		const anchor = managedEdges.get(junction.anchorEdgeId);
+		if (!anchor || anchor.fromNode !== junction.parentId) continue;
+		if (!["top", "bottom", "left", "right"].includes(junction.side)) continue;
+		const edgeIds = [...new Set(junction.edgeIds)].filter((edgeId) => {
+			const edge = managedEdges.get(edgeId);
+			return !!edge && edge.fromNode === junction.parentId && edge.fromSide === junction.side;
+		});
+		if (edgeIds.length === 0) continue;
+		junctions[junctionId] = {
+			id: junctionId,
+			parentId: junction.parentId,
+			anchorEdgeId: edgeIds.includes(junction.anchorEdgeId) ? junction.anchorEdgeId : edgeIds[0],
+			side: junction.side,
+			ratio: Math.min(0.95, Math.max(0.05, Number(junction.ratio) || 0.5)),
+			edgeIds,
+		};
+	}
+	state.junctions = junctions;
 	state.collapsedNodeIds = [...new Set(state.collapsedNodeIds)].filter((id) =>
 		existingIds.has(id),
 	);
@@ -473,5 +510,22 @@ export function duplicateBranch(
 		.filter((id) => branch.has(id))
 		.map((id) => oldToNew.get(id)!)
 		.filter(Boolean);
+	nextState.junctions = {};
+	for (const junction of Object.values(state.junctions)) {
+		if (!branch.has(junction.parentId)) continue;
+		const remappedEdgeIds = junction.edgeIds
+			.filter((edgeId) => edgeIds.has(edgeId))
+			.map((edgeId) => edgeIds.get(edgeId)!);
+		const anchorEdgeId = edgeIds.get(junction.anchorEdgeId);
+		if (remappedEdgeIds.length === 0 || !anchorEdgeId) continue;
+		const id = makeId("edge", `junction-${junction.id}`);
+		nextState.junctions[id] = {
+			...cloneJson(junction),
+			id,
+			parentId: oldToNew.get(junction.parentId)!,
+			anchorEdgeId,
+			edgeIds: remappedEdgeIds,
+		};
+	}
 	return { state: nextState, nodes, edges, rootId: newRoot, oldToNew };
 }

@@ -11,6 +11,11 @@ import { ColorApplyResult, ColorPaletteHandle, openColorPalette } from "./color-
 import { HeightController } from "./height-controller";
 import { NativeColorPickerHandle, enhanceNativeColorPicker } from "./native-color-picker";
 import {
+	BranchingOverlay,
+	branchGroupKey,
+	managedBranchGroups,
+} from "./branching";
+import {
 	findContactParent,
 	findCanvasControlContainers,
 	findCanvasHistoryAnchor,
@@ -31,7 +36,10 @@ import {
 	CanvasEdgeData,
 	CanvasMindMapState,
 	CanvasNodeData,
+	BranchJunction,
 	BranchSide,
+	CanvasSide,
+	EdgeId,
 	LayoutMode,
 	NodeId,
 	Point,
@@ -182,6 +190,8 @@ export class CanvasController {
 	private readonly height: HeightController;
 	private colorPalette?: ColorPaletteHandle;
 	private readonly nativeColorPickers = new Map<HTMLElement, NativeColorPickerHandle>();
+	private branchingOverlay?: BranchingOverlay;
+	private branchingRefreshFrame?: number;
 	private removeNativeDragHook?: () => void;
 	private removeDataImportHook?: () => void;
 	private historySyncTimer?: number;
@@ -432,6 +442,260 @@ export class CanvasController {
 
 	private commitState(): void {
 		this.options.onStateChange(cloneJson(this.state));
+		this.scheduleBranchingRefresh();
+	}
+
+	private scheduleBranchingRefresh(): void {
+		if (this.disposed) return;
+		if (this.branchingRefreshFrame !== undefined) return;
+		const requestFrame = this.win.requestAnimationFrame?.bind(this.win);
+		if (requestFrame) {
+			this.branchingRefreshFrame = requestFrame(() => {
+				this.branchingRefreshFrame = undefined;
+				this.refreshBranchingOverlay();
+			});
+		} else {
+			this.branchingRefreshFrame = this.win.setTimeout(() => {
+				this.branchingRefreshFrame = undefined;
+				this.refreshBranchingOverlay();
+			}, 0) as unknown as number;
+		}
+	}
+
+	private removeBranchingOverlay(): void {
+		if (this.branchingRefreshFrame !== undefined) {
+			this.win.cancelAnimationFrame?.(this.branchingRefreshFrame);
+			this.win.clearTimeout(this.branchingRefreshFrame);
+			this.branchingRefreshFrame = undefined;
+		}
+		this.branchingOverlay?.dispose();
+		this.branchingOverlay = undefined;
+	}
+
+	private refreshBranchingOverlay(): void {
+		if (this.disposed || !this.state.enabled || !this.state.branchingEnabled ||
+			!this.adapter.capabilities.available || !this.adapter.canvas.wrapperEl) {
+			this.removeBranchingOverlay();
+			return;
+		}
+		if (!this.branchingOverlay) {
+			this.branchingOverlay = new BranchingOverlay(this.adapter.canvas.wrapperEl, {
+				canEdit: () => !this.adapter.capabilities.readOnly && this.state.enabled && this.state.branchingEnabled,
+				getNodeIdAt: (clientX, clientY) => this.nodeIdAtPoint(clientX, clientY),
+				onJunctionPreview: () => undefined,
+				onJunctionCommit: (junctionId, ratio) => this.commitJunctionPosition(junctionId, ratio),
+				onConnect: (junctionId, nodeId) => this.connectJunction(junctionId, nodeId),
+				onPathContextMenu: (edgeId, ratio, event) => this.showBranchPathMenu(edgeId, ratio, event),
+				onJunctionContextMenu: (junctionId, event) => this.showJunctionMenu(junctionId, event),
+			});
+		}
+		const data = this.adapter.getData();
+		const hidden = hiddenNodeIds(this.state);
+		const customEdges = new Set(
+			managedBranchGroups(data, this.state)
+				.flatMap((group) => {
+					const visibleEdges = group.edges.filter((edge) =>
+						!hidden.has(edge.fromNode) && !hidden.has(edge.toNode),
+					);
+					return (visibleEdges.length > 1 || group.junctions.length > 0)
+						? visibleEdges.map((edge) => edge.id)
+						: [];
+				}),
+		);
+		for (const edge of data.edges) {
+			if (!Object.values(this.state.relations).some((relation) => relation.edgeId === edge.id)) continue;
+			this.adapter.setEdgeVisibility(
+				edge.id,
+				!customEdges.has(edge.id) && !hidden.has(edge.fromNode) && !hidden.has(edge.toNode),
+			);
+		}
+		this.branchingOverlay.update(data, this.state, hidden, (nodeId) => this.adapter.node(nodeId)?.nodeEl);
+	}
+
+	private nodeIdAtPoint(clientX: number, clientY: number): NodeId | undefined {
+		for (const node of this.adapter.nodes()) {
+			const rect = node.nodeEl?.getBoundingClientRect?.();
+			if (!rect || clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) continue;
+			return node.id;
+		}
+		const element = this.win.document.elementFromPoint(clientX, clientY);
+		return element ? this.nodeIdFromElement(element) : undefined;
+	}
+
+	setBranchingEnabled(enabled: boolean): void {
+		if (this.state.branchingEnabled === enabled) return;
+		this.state.branchingEnabled = enabled;
+		this.commitState();
+		this.refreshRuntime();
+	}
+
+	private newJunctionId(used = new Set<string>()): string {
+		return randomId("canvas-mindmap-junction", used);
+	}
+
+	private junctionById(junctionId: string): BranchJunction | undefined {
+		return this.state.junctions[junctionId];
+	}
+
+	private groupForJunction(junctionId: string): {
+		parentId: NodeId;
+		side: CanvasSide;
+		edgeIds: EdgeId[];
+		anchorEdgeId: EdgeId;
+	} | undefined {
+		const data = this.adapter.getData();
+		const persisted = this.junctionById(junctionId);
+		if (persisted) return persisted;
+		if (!junctionId.startsWith("auto:")) return undefined;
+		const key = junctionId.slice("auto:".length);
+		const group = managedBranchGroups(data, this.state).find((candidate) => candidate.key === key);
+		if (!group || group.edges.length < 2) return undefined;
+		return {
+			parentId: group.parentId,
+			side: group.side,
+			edgeIds: group.edges.map((edge) => edge.id),
+			anchorEdgeId: group.edges[0].id,
+		};
+	}
+
+	private addJunction(edgeId: EdgeId, ratio: number): boolean {
+		const data = this.adapter.getData();
+		const relation = Object.entries(this.state.relations).find(([, candidate]) => candidate.edgeId === edgeId);
+		const edge = data.edges.find((candidate) => candidate.id === edgeId);
+		if (!relation || !edge) return false;
+		const [childId, parentRelation] = relation;
+		const parentId = parentRelation.parentId;
+		const group = managedBranchGroups(data, this.state).find((candidate) =>
+			candidate.parentId === parentId && candidate.side === edge.fromSide,
+		);
+		if (!group) return false;
+		const nextState = cloneJson(this.state);
+		const ids = new Set(Object.keys(nextState.junctions));
+		const existing = Object.values(nextState.junctions).filter((junction) =>
+			junction.parentId === parentId && junction.side === edge.fromSide,
+		);
+		const junctionId = this.newJunctionId(ids);
+		nextState.junctions[junctionId] = {
+			id: junctionId,
+			parentId,
+			anchorEdgeId: edgeId,
+			side: edge.fromSide,
+			ratio: Math.min(0.95, Math.max(0.05, ratio)),
+			edgeIds: existing.length === 0 ? group.edges.map((candidate) => candidate.id) : [edgeId],
+		};
+		this.state = nextState;
+		this.commitState();
+		return true;
+	}
+
+	private commitJunctionPosition(junctionId: string, ratio: number): void {
+		const group = this.groupForJunction(junctionId);
+		if (!group) return;
+		const nextState = cloneJson(this.state);
+		let targetId = junctionId;
+		if (!nextState.junctions[junctionId]) {
+			targetId = this.newJunctionId(new Set(Object.keys(nextState.junctions)));
+			nextState.junctions[targetId] = {
+				id: targetId,
+				parentId: group.parentId,
+				anchorEdgeId: group.anchorEdgeId,
+				side: group.side,
+				ratio: 0.5,
+				edgeIds: [...group.edgeIds],
+			};
+		}
+		nextState.junctions[targetId].ratio = Math.min(0.95, Math.max(0.05, ratio));
+		this.state = nextState;
+		this.commitState();
+		this.branchingOverlay?.clearPreview(junctionId);
+	}
+
+	private removeJunction(junctionId: string): boolean {
+		if (!this.state.junctions[junctionId]) return false;
+		const nextState = cloneJson(this.state);
+		delete nextState.junctions[junctionId];
+		this.state = nextState;
+		this.commitState();
+		return true;
+	}
+
+	private resetJunction(junctionId: string): boolean {
+		if (!this.state.junctions[junctionId]) return false;
+		const nextState = cloneJson(this.state);
+		nextState.junctions[junctionId].ratio = 0.5;
+		this.state = nextState;
+		this.commitState();
+		return true;
+	}
+
+	private connectJunction(junctionId: string, nodeId: NodeId): void {
+		const group = this.groupForJunction(junctionId);
+		if (!group || nodeId === group.parentId || !canReparent(this.state, nodeId, group.parentId)) return;
+		const beforeEdgeId = this.state.relations[nodeId]?.edgeId;
+		if (!this.reparentNode(
+			nodeId,
+			group.parentId,
+			group.side === "left" || group.side === "right" ? group.side : undefined,
+		)) return;
+		const afterEdgeId = this.state.relations[nodeId]?.edgeId;
+		if (!afterEdgeId) return;
+		const nextState = cloneJson(this.state);
+		for (const junction of Object.values(nextState.junctions)) {
+			junction.edgeIds = junction.edgeIds.filter((edgeId) => edgeId !== beforeEdgeId && edgeId !== afterEdgeId);
+		}
+		const target = nextState.junctions[junctionId] ?? Object.values(nextState.junctions).find((junction) =>
+			junction.parentId === group.parentId && junction.side === group.side,
+		);
+		if (target) target.edgeIds.push(afterEdgeId);
+		this.state = nextState;
+		this.commitState();
+	}
+
+	private showBranchPathMenu(edgeId: EdgeId, ratio: number, event: MouseEvent): void {
+		const relation = Object.entries(this.state.relations).find(([, candidate]) => candidate.edgeId === edgeId);
+		if (!relation) return;
+		const menu = new Menu();
+		menu.addItem((item: any) => item.setTitle("Add branching junction here").setIcon("git-branch").onClick(() => this.addJunction(edgeId, ratio)));
+		menu.addItem((item: any) => item.setTitle("Create child here").setIcon("plus").onClick(() => this.createChildFromBranchPath(edgeId, ratio)));
+		menu.showAtMouseEvent(event);
+	}
+
+	private createChildFromBranchPath(edgeId: EdgeId, ratio: number): boolean {
+		const relation = Object.entries(this.state.relations).find(([, candidate]) => candidate.edgeId === edgeId);
+		if (!relation) return false;
+		const before = new Set(relationChildren(this.state, relation[1].parentId));
+		if (!this.createChild(relation[1].parentId)) return false;
+		const childId = relationChildren(this.state, relation[1].parentId).find((id) => !before.has(id));
+		const createdEdgeId = childId ? this.state.relations[childId]?.edgeId : undefined;
+		return createdEdgeId ? this.addJunction(createdEdgeId, ratio) : true;
+	}
+
+	private showJunctionMenu(junctionId: string, event: MouseEvent): void {
+		const group = this.groupForJunction(junctionId);
+		if (!group) return;
+		const menu = new Menu();
+		menu.addItem((item: any) => item.setTitle("Create child at junction").setIcon("plus").onClick(() => this.createChildAtJunction(junctionId)));
+		menu.addItem((item: any) => {
+			item.setTitle("Reset junction position").setIcon("rotate-ccw");
+			item.setDisabled?.(junctionId.startsWith("auto:"));
+			return item.onClick(() => this.resetJunction(junctionId));
+		});
+		if (!junctionId.startsWith("auto:")) {
+			menu.addItem((item: any) => item.setTitle("Remove junction").setIcon("unlink").onClick(() => this.removeJunction(junctionId)));
+		}
+		menu.showAtMouseEvent(event);
+	}
+
+	private createChildAtJunction(junctionId: string): boolean {
+		const group = this.groupForJunction(junctionId);
+		if (!group) return false;
+		const before = new Set(relationChildren(this.state, group.parentId));
+		if (!this.createChild(group.parentId, group.side === "left" || group.side === "right" ? group.side : undefined)) return false;
+		const child = relationChildren(this.state, group.parentId).find((id) => !before.has(id));
+		const edgeId = child ? this.state.relations[child]?.edgeId : undefined;
+		if (!edgeId) return true;
+		const result = this.addJunction(edgeId, this.state.junctions[junctionId]?.ratio ?? 0.5);
+		return result || true;
 	}
 
 	private refreshRuntime(): void {
@@ -439,6 +703,7 @@ export class CanvasController {
 		if (!this.state.enabled || this.disposed) {
 			this.cancelPointerInteraction();
 			this.height.pause();
+			this.removeBranchingOverlay();
 			this.revealAll();
 			this.removeControls();
 			return;
@@ -646,6 +911,7 @@ export class CanvasController {
 			}
 			if (visibleAncestor) this.adapter.selectOnly(visibleAncestor);
 		}
+		this.refreshBranchingOverlay();
 	}
 
 	private refreshControls(): void {
@@ -1518,6 +1784,14 @@ export class CanvasController {
 		const previousEdge = previous && data.edges.find((edge) => edge.id === previous.edgeId);
 		const order = relationChildren(nextState, parentId).length;
 		if (!attachChild(nextState, childId, parentId, edgeId, order)) return false;
+		if (previous?.edgeId) {
+			for (const [junctionId, junction] of Object.entries(nextState.junctions)) {
+				junction.edgeIds = junction.edgeIds.filter((candidate) => candidate !== previous.edgeId);
+				if (junction.anchorEdgeId === previous.edgeId || junction.edgeIds.length === 0) {
+					delete nextState.junctions[junctionId];
+				}
+			}
+		}
 		const mode = this.currentLayout(parentId);
 		const actualSide = side ?? (child.x >= parent.x ? "right" : "left");
 		const root = rootOf(nextState, parentId);
@@ -1685,6 +1959,7 @@ export class CanvasController {
 		this.updateContactTarget(drag);
 		this.syncDraggedBranch(drag);
 		this.updateContactTarget(drag);
+		this.scheduleBranchingRefresh();
 	}
 
 	private onNativeDragEnd(event: PointerEvent): void {
@@ -1730,6 +2005,7 @@ export class CanvasController {
 		if (!drag.active) return;
 		event.preventDefault();
 		this.scheduleDragFrame();
+		this.scheduleBranchingRefresh();
 	};
 
 	private onPointerUp = (event: PointerEvent): void => {
@@ -2090,6 +2366,10 @@ export class CanvasController {
 		}
 		const menu = new Menu();
 		menu.addItem((item: any) => item.setTitle("Create child").setIcon("plus").onClick(() => this.createChild(nodeId)));
+		menu.addItem((item: any) => item
+			.setTitle(this.state.branchingEnabled ? "Disable shared branching arrows" : "Enable shared branching arrows")
+			.setIcon("git-branch")
+			.onClick(() => this.setBranchingEnabled(!this.state.branchingEnabled)));
 		if (parentOf(this.state, nodeId)) {
 			menu.addItem((item: any) => item.setTitle("Create next sibling").setIcon("plus").onClick(() => this.createSibling(nodeId, "after")));
 			menu.addItem((item: any) => item.setTitle("Create previous sibling").setIcon("plus").onClick(() => this.createSibling(nodeId, "before")));
@@ -2160,6 +2440,7 @@ export class CanvasController {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.closeColorPalette();
+		this.removeBranchingOverlay();
 		for (const handle of this.nativeColorPickers.values()) handle.dispose();
 		this.nativeColorPickers.clear();
 		this.cancelPointerInteraction();
