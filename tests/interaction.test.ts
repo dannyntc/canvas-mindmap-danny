@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
 	findContactParent,
+	findCanvasControlContainers,
 	hasStructuralCanvasMutation,
 	hasPassedDragThreshold,
 	intersectionArea,
@@ -60,4 +61,19 @@ test("editor mutations are ignored by structural Canvas refreshes", () => {
 	assert.equal(isEditorMutationTarget(canvasTarget), false);
 	assert.equal(hasStructuralCanvasMutation([{ target: editorTarget } as MutationRecord]), false);
 	assert.equal(hasStructuralCanvasMutation([{ target: canvasTarget } as MutationRecord]), true);
+});
+
+test("Canvas control discovery searches unique view host roots", () => {
+	const controlA = {} as HTMLElement;
+	const controlB = {} as HTMLElement;
+	const root = (controls: HTMLElement[]) => ({
+		querySelectorAll: (selector: string) => selector === ".canvas-controls" ? controls : [],
+	}) as unknown as HTMLElement;
+	const firstRoot = root([controlA]);
+	const secondRoot = root([controlB]);
+
+	assert.deepEqual(
+		findCanvasControlContainers([firstRoot, firstRoot, secondRoot]),
+		[controlA, controlB],
+	);
 });

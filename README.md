@@ -1,4 +1,4 @@
-# Canvas-Mindmap-Danny 1.1.2
+# Canvas-Mindmap-Danny 1.1.3
 
 Canvas Mindmap is an Obsidian desktop plugin by Boninall, extended here with opt-in per-Canvas mind-map mode. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
 

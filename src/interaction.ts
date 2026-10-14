@@ -39,6 +39,28 @@ export function hasStructuralCanvasMutation(records: readonly MutationRecord[]):
 	return records.some((record) => !isEditorMutationTarget(record.target));
 }
 
+/**
+ * Find native Canvas sidebar containers across the possible view host roots.
+ * Obsidian can place the controls under the wrapper, content, or outer view
+ * element depending on the desktop view implementation.
+ */
+export function findCanvasControlContainers(roots: readonly HTMLElement[]): HTMLElement[] {
+	const containers: HTMLElement[] = [];
+	const seen = new Set<HTMLElement>();
+	const add = (element: HTMLElement): void => {
+		if (seen.has(element)) return;
+		seen.add(element);
+		containers.push(element);
+	};
+	for (const root of roots) {
+		if (root.classList?.contains("canvas-controls")) add(root);
+		for (const container of Array.from(root.querySelectorAll<HTMLElement>(".canvas-controls"))) {
+			add(container);
+		}
+	}
+	return containers;
+}
+
 export function rectanglesTouch(first: Rect, second: Rect): boolean {
 	return first.left <= second.right &&
 		first.right >= second.left &&

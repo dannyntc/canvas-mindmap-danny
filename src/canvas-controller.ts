@@ -8,6 +8,7 @@ import {
 import { HeightController } from "./height-controller";
 import {
 	findContactParent,
+	findCanvasControlContainers,
 	hasPassedDragThreshold,
 	hasStructuralCanvasMutation,
 	panViewport,
@@ -199,7 +200,12 @@ export class CanvasController {
 
 	private observeCanvasDom(): void {
 		if (typeof MutationObserver === "undefined") return;
-		const target = this.view.containerEl;
+		const observeHosts = (): void => {
+			if (!this.domObserver) return;
+			for (const target of this.canvasHostRoots()) {
+				this.domObserver.observe(target, { childList: true, subtree: true });
+			}
+		};
 		this.domObserver = new MutationObserver((records) => {
 			if (!hasStructuralCanvasMutation(records)) return;
 			if (!this.state.enabled || this.domSyncTimer) return;
@@ -211,10 +217,10 @@ export class CanvasController {
 				this.updateZoomControls();
 				this.applyVisibility();
 				this.refreshControls();
-				this.domObserver.observe(target, { childList: true, subtree: true });
+				observeHosts();
 			}, 0);
 		});
-		this.domObserver.observe(target, { childList: true, subtree: true });
+		observeHosts();
 	}
 
 	private reconcileStateWithCanvas(): void {
@@ -338,21 +344,38 @@ export class CanvasController {
 	private updateZoomControls(): void {
 		const controlRoot = this.view.containerEl;
 		controlRoot.classList.toggle("canvas-mindmap-mode-active", this.state.enabled && !this.disposed);
-		if (!this.state.enabled || this.disposed || this.adapter.capabilities.readOnly) {
-			this.restoreZoomControls(controlRoot);
+		if (!this.state.enabled || this.disposed || !this.adapter.capabilities.available || this.adapter.capabilities.readOnly) {
+			this.restoreZoomControls(this.canvasHostRoots());
 			this.removeArrangeControl();
 			return;
 		}
-		for (const control of Array.from(controlRoot.querySelectorAll<HTMLElement>(
-			".canvas-controls .canvas-control-item, .canvas-controls button, .canvas-controls [role='button']",
-		))) {
-			if (this.isZoomInOrOutControl(control)) this.hideZoomControl(control);
+		for (const controls of this.canvasControlContainers()) {
+			for (const control of Array.from(controls.querySelectorAll<HTMLElement>(
+				".canvas-control-item, button, [role='button']",
+			))) {
+				if (this.isZoomInOrOutControl(control)) this.hideZoomControl(control);
+			}
 		}
 		this.ensureArrangeControl();
 	}
 
+	private canvasHostRoots(): HTMLElement[] {
+		const roots: HTMLElement[] = [];
+		const seen = new Set<HTMLElement>();
+		for (const root of [this.adapter.canvas.wrapperEl, this.view.contentEl, this.view.containerEl]) {
+			if (!root || seen.has(root)) continue;
+			seen.add(root);
+			roots.push(root);
+		}
+		return roots;
+	}
+
+	private canvasControlContainers(): HTMLElement[] {
+		return findCanvasControlContainers(this.canvasHostRoots());
+	}
+
 	private ensureArrangeControl(): void {
-		const controls = this.view.containerEl.querySelector<HTMLElement>(".canvas-controls");
+		const controls = this.canvasControlContainers()[0];
 		if (!controls) {
 			this.removeArrangeControl();
 			return;
@@ -365,13 +388,13 @@ export class CanvasController {
 			return;
 		}
 		this.removeArrangeControl();
-		const button = this.view.containerEl.ownerDocument.createElement("button");
+		const button = controls.ownerDocument.createElement("button");
 		button.type = "button";
 		button.className = "canvas-control-item canvas-mindmap-arrange-control clickable-icon";
 		button.dataset.canvasMindmapAction = "arrange";
 		button.setAttribute("aria-label", "Arrange mind map");
 		setTooltip(button, "Arrange mind map");
-		setIcon(button, "layout-dashboard");
+		setIcon(button, "git-branch");
 		button.addEventListener("pointerdown", (event) => event.stopPropagation());
 		button.addEventListener("click", (event) => {
 			event.preventDefault();
@@ -385,9 +408,11 @@ export class CanvasController {
 	private removeArrangeControl(): void {
 		this.arrangeControl?.remove();
 		this.arrangeControl = undefined;
-		for (const control of Array.from(this.view.containerEl.querySelectorAll(
-			"[data-canvas-mindmap-action='arrange']",
-		))) control.remove();
+		for (const root of this.canvasHostRoots()) {
+			for (const control of Array.from(root.querySelectorAll(
+				"[data-canvas-mindmap-action='arrange']",
+			))) control.remove();
+		}
 	}
 
 	private isZoomInOrOutControl(element: HTMLElement): boolean {
@@ -426,16 +451,21 @@ export class CanvasController {
 		element.setAttribute("tabindex", "-1");
 	}
 
-	private restoreZoomControls(wrapper: HTMLElement): void {
-		for (const element of Array.from(wrapper.querySelectorAll<HTMLElement>(".canvas-mindmap-zoom-hidden"))) {
-			element.classList.remove("canvas-mindmap-zoom-hidden");
-			const previous = this.zoomControlStates.get(element);
-			if (!previous || previous.ariaHidden === null) element.removeAttribute("aria-hidden");
-			else element.setAttribute("aria-hidden", previous.ariaHidden);
-			if (!previous || previous.tabIndex === null) element.removeAttribute("tabindex");
-			else element.setAttribute("tabindex", previous.tabIndex);
+	private restoreZoomControls(roots: readonly HTMLElement[]): void {
+		const restored = new Set<HTMLElement>();
+		for (const root of roots) {
+			for (const element of Array.from(root.querySelectorAll<HTMLElement>(".canvas-mindmap-zoom-hidden"))) {
+				if (restored.has(element)) continue;
+				restored.add(element);
+				element.classList.remove("canvas-mindmap-zoom-hidden");
+				const previous = this.zoomControlStates.get(element);
+				if (!previous || previous.ariaHidden === null) element.removeAttribute("aria-hidden");
+				else element.setAttribute("aria-hidden", previous.ariaHidden);
+				if (!previous || previous.tabIndex === null) element.removeAttribute("tabindex");
+				else element.setAttribute("tabindex", previous.tabIndex);
+			}
 		}
-		wrapper.classList.remove("canvas-mindmap-mode-active");
+		for (const root of roots) root.classList.remove("canvas-mindmap-mode-active");
 	}
 
 	private revealAll(): void {
@@ -1611,7 +1641,7 @@ export class CanvasController {
 		this.removeDataImportHook = undefined;
 		this.revealAll();
 		this.removeControls();
-		this.restoreZoomControls(this.view.containerEl);
+		this.restoreZoomControls(this.canvasHostRoots());
 		this.height.dispose();
 		this.keyTarget?.removeEventListener("keydown", this.onKeyDown, true);
 		this.keyTarget?.removeEventListener("pointerdown", this.onPointerDown, true);

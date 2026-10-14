@@ -86,8 +86,11 @@
     color: var(--text-muted);
     cursor: pointer;
     display: inline-flex;
+    height: var(--size-4-8);
     justify-content: center;
+    min-width: var(--size-4-8);
     padding: 0;
+    width: var(--size-4-8);
 }
 
 .canvas-mindmap-arrange-control:hover,
