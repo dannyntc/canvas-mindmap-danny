@@ -489,12 +489,12 @@ export class CanvasController {
 		const existing = controls.querySelector<HTMLButtonElement>(
 			"[data-canvas-mindmap-action='arrange']",
 		);
-		if (existing) {
+		if (existing && existing === this.arrangeControl) {
 			this.arrangeControl = existing;
 			this.positionArrangeControl(controls, existing);
 			return;
 		}
-		this.removeArrangeControl();
+		this.removeStaleArrangeControls();
 		const button = controls.ownerDocument.createElement("button");
 		button.type = "button";
 		button.className = "canvas-control-item canvas-mindmap-arrange-control clickable-icon";
@@ -503,14 +503,23 @@ export class CanvasController {
 		setTooltip(button, "Arrange mind map");
 		setIcon(button, "git-branch");
 		button.addEventListener("pointerdown", (event) => event.stopPropagation());
-		button.addEventListener("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			this.arrangeNeatly();
-		});
+		button.addEventListener("click", this.onArrangeClick);
 		this.positionArrangeControl(controls, button);
 		this.arrangeControl = button;
 	}
+
+	private onArrangeClick = (event: MouseEvent): void => {
+		event.preventDefault();
+		event.stopPropagation();
+		if (this.disposed || !this.state.enabled || this.view.canvas !== this.adapter.canvas ||
+			event.currentTarget !== this.arrangeControl) return;
+		try {
+			this.arrangeNeatly();
+		} catch (error) {
+			console.error("[Canvas Mindmap] Arrange mind map failed", error);
+			this.notify("Mind map could not be arranged because an unexpected Canvas error occurred.");
+		}
+	};
 
 	private positionArrangeControl(controls: HTMLElement, button: HTMLButtonElement): void {
 		const historyAnchor = findCanvasHistoryAnchor(controls);
@@ -526,10 +535,15 @@ export class CanvasController {
 	private removeArrangeControl(): void {
 		this.arrangeControl?.remove();
 		this.arrangeControl = undefined;
+	}
+
+	private removeStaleArrangeControls(): void {
 		for (const root of this.canvasHostRoots()) {
 			for (const control of Array.from(root.querySelectorAll(
 				"[data-canvas-mindmap-action='arrange']",
-			))) control.remove();
+			))) {
+				if (control !== this.arrangeControl) control.remove();
+			}
 		}
 	}
 
@@ -1940,6 +1954,7 @@ export class CanvasController {
 		this.removeDataImportHook = undefined;
 		this.revealAll();
 		this.removeControls();
+		this.removeArrangeControl();
 		this.restoreZoomControls(this.canvasHostRoots());
 		this.height.dispose();
 		this.keyTarget?.removeEventListener("keydown", this.onKeyDown, true);

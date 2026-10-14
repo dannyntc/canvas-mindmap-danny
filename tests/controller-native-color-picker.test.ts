@@ -310,4 +310,29 @@ test("clicking Arrange mind map moves the selected tree and reports success", as
 	assert.equal(data.nodes.find((node: any) => node.id === "child").x, 420);
 	assert.deepEqual(notices, ["Mind map arranged."]);
 	controller.dispose();
+
+	const replacementNotices: string[] = [];
+	const replacement = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: false,
+			autoHeight: false,
+			defaultLayout: "left-to-right" as const,
+			trees: { root: { layout: "left-to-right", branchSides: {} } },
+			relations: { child: { parentId: "root", edgeId: "edge", order: 0 } },
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+		notify: (message: string) => replacementNotices.push(message),
+	});
+	replacement.mount();
+	const replacementArrange = wrapper.querySelector("[data-canvas-mindmap-action='arrange']") as HTMLButtonElement | null;
+	assert.ok(replacementArrange);
+	assert.notEqual(replacementArrange, arrange);
+	replacementArrange.click();
+	assert.deepEqual(replacementNotices, ["Mind map is already arranged."]);
+	replacement.dispose();
 });

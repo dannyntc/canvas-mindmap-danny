@@ -1,4 +1,4 @@
-# Canvas-Mindmap-Danny 1.1.13
+# Canvas-Mindmap-Danny 1.1.14
 
 Canvas-Mindmap-Danny is an Obsidian desktop plugin maintained by Danny and based on the original Canvas Mindmap work by Boninall. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
 
