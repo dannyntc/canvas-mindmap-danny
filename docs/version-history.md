@@ -23,6 +23,7 @@ This repository reconstructs the customised Canvas Mindmap plugin from the prese
 | `v1.1.13` | Arrange notices, selected-root verification, and related test coverage. |
 | `v1.1.14` | Stale Arrange-handler disposal and remount repair. |
 | `v1.1.15` | Real-time local space making for dragging, node creation, duplication, and heading splitting, with hold-to-connect drag targets. |
+| `v1.1.16` | Increase real-time space-making clearance from 24px to 48px for dragging, branch movement, and node creation. |
 
 ## Reconstruction method
 

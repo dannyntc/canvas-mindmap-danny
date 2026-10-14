@@ -25,7 +25,7 @@ test("pushes an obstructing card clear of the moving card", () => {
 	}, groups);
 
 	assert.deepEqual(positions(result, "near", "far"), {
-		near: { x: 144, y: 0 },
+		near: { x: 168, y: 0 },
 		far: { x: 400, y: 0 },
 	});
 });
@@ -37,8 +37,8 @@ test("propagates a push through a chain while leaving distant cards fixed", () =
 		moving: { x: 40, y: 0 },
 	}, groups);
 
-	assert.equal(result.positions.first.x, 164);
-	assert.equal(result.positions.second.x, 288);
+	assert.equal(result.positions.first.x, 188);
+	assert.deepEqual(result.positions.second, { x: 220, y: 108 });
 	assert.deepEqual(result.positions.distant, { x: 500, y: 0 });
 });
 
@@ -48,7 +48,7 @@ test("recomputing from the original geometry lets cards return when the mover re
 	const pushed = resolveSpaceMaking(nodes, new Set(["moving"]), { moving: { x: 40, y: 0 } }, groups);
 	const clear = resolveSpaceMaking(nodes, new Set(["moving"]), { moving: { x: 0, y: 0 } }, groups);
 
-	assert.equal(pushed.positions.near.x, 164);
+	assert.equal(pushed.positions.near.x, 188);
 	assert.equal(clear.positions.near.x, 110);
 });
 

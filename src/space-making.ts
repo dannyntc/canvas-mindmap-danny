@@ -42,6 +42,8 @@ interface QueueItem {
 	id: NodeId;
 }
 
+const DEFAULT_SPACE_MAKING_CLEARANCE = 48;
+
 function rect(node: SpaceMakingNode, position: Point): Rect {
 	return {
 		left: position.x,
@@ -166,7 +168,7 @@ export function resolveSpaceMaking(
 	const groupOffsets = new Map<NodeId, Offset>();
 	for (const group of groups) groupOffsets.set(group.id, { x: 0, y: 0 });
 	const protectedGroups = options.protectedGroupIds ?? new Set<NodeId>();
-	const clearance = Math.max(0, options.clearance ?? 24);
+	const clearance = Math.max(0, options.clearance ?? DEFAULT_SPACE_MAKING_CLEARANCE);
 	const maxIterations = Math.max(1, options.maxIterations ?? Math.max(100, groups.length * 16));
 	const cellSize = 256;
 	const spatialIndex = new Map<string, Set<NodeId>>();

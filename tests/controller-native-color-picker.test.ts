@@ -313,7 +313,7 @@ test("dragging a card makes nearby cards move aside and return when the path cle
 	const start = new window.PointerEvent("pointerdown", { pointerId: 9, clientX: 0, clientY: 0 });
 	const callbacks = canvas.handleSelectionDrag(start, movingElement, moving);
 	callbacks.move(new window.PointerEvent("pointermove", { pointerId: 9, clientX: 20, clientY: 0 }));
-	assert.equal(nearby.x, 144);
+	assert.equal(nearby.x, 168);
 	callbacks.move(new window.PointerEvent("pointermove", { pointerId: 9, clientX: 0, clientY: 0 }));
 	assert.equal(nearby.x, 110);
 	callbacks.end(new window.PointerEvent("pointerup", { pointerId: 9, clientX: 0, clientY: 0 }));
@@ -433,7 +433,7 @@ test("creating a child makes room at its intended insertion point", async () => 
 
 	assert.equal(controller.createChild("parent"), true);
 	assert.equal(data.nodes.some((node: any) => node.id.startsWith("canvas-mindmap-node-")), true);
-	assert.equal(data.nodes.find((node: any) => node.id === "nearby").x, 524);
+	assert.equal(data.nodes.find((node: any) => node.id === "nearby").x, 548);
 	controller.dispose();
 });
 
