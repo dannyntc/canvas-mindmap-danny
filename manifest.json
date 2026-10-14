@@ -1,8 +1,8 @@
 {
 	"id": "canvas-mindmap",
 	"name": "Canvas Mindmap",
-	"version": "1.0.2",
-	"minAppVersion": "1.4.0",
+	"version": "1.1.0",
+	"minAppVersion": "1.5.0",
 	"description": "A plugin to make your canvas work like a mindmap.",
 	"author": "Boninall",
 	"authorUrl": "https://github.com/quorafind",
@@ -11,5 +11,5 @@
 		"爱发电": "https://afdian.net/a/boninall",
 		"支付宝": "https://cdn.jsdelivr.net/gh/Quorafind/.github@main/IMAGE/%E6%94%AF%E4%BB%98%E5%AE%9D%E4%BB%98%E6%AC%BE%E7%A0%81.jpg"
 	},
-	"isDesktopOnly": false
+	"isDesktopOnly": true
 }

@@ -1,0 +1,20 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "../.test-build",
+    "rootDir": "..",
+    "declaration": false
+  },
+  "include": [
+    "../src/types.ts",
+    "../src/tree-model.ts",
+    "../src/layout.ts",
+    "../src/state-store.ts",
+	"../src/interaction.ts",
+	"../src/canvas-adapter.ts",
+    "*.test.ts"
+  ]
+}

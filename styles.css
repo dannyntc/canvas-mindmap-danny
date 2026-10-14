@@ -27,3 +27,112 @@
 .mind-map-status-bar.status-bar-item .icon-container {
     margin-left: var(--size-2-2);
 }
+
+.canvas-mindmap-toolbar {
+    align-items: center;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    display: inline-flex;
+    gap: var(--size-2-2);
+    margin: var(--size-2-2);
+    padding: var(--size-2-1) var(--size-2-2);
+    position: relative;
+    z-index: 20;
+}
+
+.canvas-mindmap-mode-toggle {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    min-height: var(--size-4-4);
+    padding-inline: var(--size-2-2);
+}
+
+.canvas-mindmap-mode-status {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    user-select: none;
+}
+
+.canvas-mindmap-mode-status.is-enabled {
+    color: var(--text-success);
+}
+
+.canvas-mindmap-controls {
+    align-items: center;
+    display: flex;
+    gap: var(--size-2-1);
+    left: 50%;
+    opacity: 0;
+    padding: var(--size-2-1);
+    pointer-events: none;
+    position: absolute;
+    top: calc(100% + var(--size-2-1));
+    transform: translateX(-50%);
+    transition: opacity 100ms ease;
+    z-index: 10;
+}
+
+.canvas-node:hover > .canvas-mindmap-controls,
+.canvas-node:focus-within > .canvas-mindmap-controls,
+.canvas-mindmap-controls:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.canvas-mindmap-control {
+    align-items: center;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    box-shadow: var(--shadow-s);
+    color: var(--text-normal);
+    display: inline-flex;
+    font-size: var(--font-ui-small);
+    height: var(--size-4-4);
+    justify-content: center;
+    min-width: var(--size-4-4);
+    padding: 0 var(--size-2-1);
+}
+
+.canvas-mindmap-control:hover,
+.canvas-mindmap-control:focus-visible,
+.canvas-mindmap-mode-toggle:hover,
+.canvas-mindmap-mode-toggle:focus-visible {
+    background: var(--background-modifier-hover);
+    color: var(--text-accent);
+}
+
+.canvas-mindmap-hidden {
+    visibility: hidden !important;
+}
+
+.canvas-mindmap-zoom-hidden {
+    display: none !important;
+}
+
+.canvas-mindmap-panning {
+    cursor: grabbing !important;
+}
+
+.canvas-mindmap-drop-target {
+    outline: 2px solid var(--interactive-accent) !important;
+    outline-offset: 4px;
+}
+
+.canvas-mindmap-drop-target::after {
+    background: var(--background-primary);
+    border: 1px solid var(--interactive-accent);
+    border-radius: var(--radius-s);
+    color: var(--text-accent);
+    content: "Release to attach";
+    font-size: var(--font-ui-smaller);
+    left: 50%;
+    padding: var(--size-2-1) var(--size-2-2);
+    pointer-events: none;
+    position: absolute;
+    top: calc(100% + var(--size-2-1));
+    transform: translateX(-50%);
+    white-space: nowrap;
+    z-index: 20;
+}

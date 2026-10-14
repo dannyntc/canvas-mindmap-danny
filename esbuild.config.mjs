@@ -1,0 +1,28 @@
+import * as esbuild from "esbuild";
+
+const watch = process.argv.includes("--watch");
+const production = process.argv.includes("--production");
+
+const options = {
+  entryPoints: ["src/main.ts"],
+  bundle: true,
+  platform: "browser",
+  target: ["es2020"],
+  format: "cjs",
+  external: ["obsidian"],
+  outfile: "main.js",
+  sourcemap: false,
+  minify: production,
+  legalComments: "eof",
+  banner: {
+    js: "/*! Canvas Mindmap 1.1.0 — Copyright (c) Boninall — MIT License */",
+  },
+};
+
+if (watch) {
+  const context = await esbuild.context(options);
+  await context.watch();
+  console.log("Canvas Mindmap development build watching src/");
+} else {
+  await esbuild.build(options);
+}

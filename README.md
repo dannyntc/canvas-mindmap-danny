@@ -1,0 +1,47 @@
+# Canvas Mindmap 1.1.0
+
+Canvas Mindmap is an Obsidian desktop plugin by Boninall, extended here with opt-in per-Canvas mind-map mode. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
+
+## Build
+
+```bash
+npm install
+npm run typecheck
+npm test
+npm run build
+```
+
+The production outputs are `main.js`, `manifest.json`, and `styles.css`. Obsidian is an external runtime dependency; its private Canvas APIs are accessed only through the capability-checked adapter in `src/canvas-adapter.ts`.
+
+## Install locally
+
+1. Create `<vault>/.obsidian/plugins/canvas-mindmap/`.
+2. Copy `main.js`, `manifest.json`, and `styles.css` into that directory.
+3. In Obsidian, reload installed plugins if needed, then enable **Canvas Mindmap**.
+4. Open a Canvas and use the **Mind-map: Off** toolbar toggle to enable mode for that Canvas only.
+
+New Canvases remain disabled until explicitly enabled. Existing directed connections are adopted only when they form an unambiguous acyclic tree; ambiguous connections remain cross-links.
+
+## Main interactions
+
+- `Tab` creates a child; `Enter` creates a sibling for a non-root card.
+- `Space` starts editing; native Markdown editor keys remain native while editing.
+- Arrow keys select the nearest visible card.
+- `Delete`/`Backspace` deletes the selected branch, including collapsed descendants.
+- In enabled mode, the native zoom-in and zoom-out buttons are hidden; mouse-wheel and trackpad zoom remain available.
+- Left-drag empty canvas space to pan around the map. Hold `Shift` while dragging empty space to retain native Canvas selection-box behavior.
+- Drag a single branch until its card touches another visible card. The prospective parent is highlighted; release while touching to attach the branch. Hold `Cmd` on macOS or `Ctrl` on Windows to move without attaching.
+- The node menu and hover controls provide layout, collapse, branch selection, duplication, coloring, and sibling-order actions.
+- Automatic height is enabled for text cards by default, with per-card manual opt-out.
+
+## Source layout
+
+- `src/tree-model.ts` — pure tree validation, adoption, traversal, branch operations, and duplication.
+- `src/layout.ts` — pure variable-size directional and balanced layout.
+- `src/state-store.ts` — versioned per-Canvas metadata migration and cleanup.
+- `src/canvas-adapter.ts` — the private Canvas capability boundary and transaction wrapper.
+- `src/canvas-controller.ts` — per-view keyboard, controls, visibility, drag, and structural actions.
+- `src/height-controller.ts` — debounced natural text measurement and resize observation.
+- `src/main.ts` — Obsidian lifecycle, commands, settings, and multi-view synchronization.
+
+The original installed 1.0.2 files are preserved in `baseline/` for comparison. No vault installation or publication is performed by this workspace handoff.
