@@ -12,6 +12,7 @@
     "../src/types.ts",
     "../src/tree-model.ts",
     "../src/layout.ts",
+	    "../src/space-making.ts",
     "../src/state-store.ts",
 	"../src/interaction.ts",
 	"../src/canvas-adapter.ts",

@@ -34,8 +34,15 @@ import {
 	BranchSide,
 	LayoutMode,
 	NodeId,
+	Point,
 	cloneJson,
 } from "./types";
+import {
+	buildSpaceMakingGroups,
+	resolveSpaceMaking,
+	SpaceMakingGroup,
+	SpaceMakingNode,
+} from "./space-making";
 import {
 	applyBranchDeletion,
 	attachChild,
@@ -88,12 +95,18 @@ interface DragSnapshot {
 	directSelection: Set<NodeId>;
 	movementRoots: Set<NodeId>;
 	positions: Record<NodeId, { x: number; y: number }>;
+	initialPositions: Record<NodeId, Point>;
+	spaceGroups: SpaceMakingGroup[];
+	spaceMovedIds: Set<NodeId>;
 	modifier: boolean;
 	active: boolean;
 	canReparent: boolean;
 	modifierDuringDrag: boolean;
 	nativeLifecycle?: boolean;
 	contactTargetId?: NodeId;
+	contactCandidateId?: NodeId;
+	connectionTargetId?: NodeId;
+	contactTimer?: number;
 	frame?: number;
 }
 
@@ -110,6 +123,8 @@ interface PanSnapshot {
 interface HistoryBaseline {
 	beforeData: CanvasData;
 	beforeState: CanvasMindMapState;
+	preservePositions?: boolean;
+	affectedNodeIds?: ReadonlySet<NodeId>;
 }
 
 interface ColorPaletteTarget {
@@ -812,6 +827,35 @@ export class CanvasController {
 		return changed;
 	}
 
+	private spaceMakingPlan(
+		data: CanvasData,
+		state: CanvasMindMapState,
+		movingIds: ReadonlySet<NodeId>,
+	): { positions: Record<NodeId, Point>; movedIds: Set<NodeId> } {
+		if (!state.autoLayout) return { positions: {}, movedIds: new Set() };
+		const hidden = hiddenNodeIds(state);
+		const nodes: SpaceMakingNode[] = data.nodes
+			.filter((node) => node.type !== "group" && !hidden.has(node.id))
+			.map((node) => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }));
+		const nodeById = new Map(nodes.map((node) => [node.id, node]));
+		const parentById: Record<NodeId, NodeId | undefined> = {};
+		for (const [childId, relation] of Object.entries(state.relations)) parentById[childId] = relation.parentId;
+		const groups = buildSpaceMakingGroups(nodes.map((node) => node.id), movingIds, parentById);
+		const movingPositions: Record<NodeId, Point> = {};
+		for (const node of nodes) {
+			if (movingIds.has(node.id)) movingPositions[node.id] = { x: node.x, y: node.y };
+		}
+		const result = resolveSpaceMaking(nodes, movingIds, movingPositions, groups);
+		const movedIds = new Set<NodeId>();
+		for (const [nodeId, position] of Object.entries(result.positions)) {
+			const original = nodeById.get(nodeId);
+			if (original && (Math.abs(position.x - original.x) > 0.5 || Math.abs(position.y - original.y) > 0.5)) {
+				movedIds.add(nodeId);
+			}
+		}
+		return { positions: result.positions, movedIds };
+	}
+
 	createChild(parentId: NodeId | undefined, side?: BranchSide): boolean {
 		if (!this.state.enabled || this.adapter.capabilities.readOnly) return false;
 		if (!parentId) return false;
@@ -826,12 +870,27 @@ export class CanvasController {
 		const edge = this.createEdge(edgeId, parent, child);
 		const order = relationChildren(this.state, parentId).length;
 		if (!canReparent(this.state, nodeId, parentId)) return false;
+		const nextState = cloneJson(this.state);
+		attachChild(nextState, nodeId, parentId, edgeId, order);
+		const candidateData = cloneJson(this.adapter.getData());
+		candidateData.nodes.push(child);
+		candidateData.edges.push(edge);
+		const movingIds = new Set<NodeId>([nodeId]);
+		const spacing = this.spaceMakingPlan(candidateData, nextState, movingIds);
 		const transaction = this.adapter.transaction("Create child", (data) => {
 			data.nodes.push(child);
 			data.edges.push(edge);
+			for (const node of data.nodes) {
+				const planned = spacing.positions[node.id];
+				if (planned && !movingIds.has(node.id)) {
+					node.x = Math.round(planned.x);
+					node.y = Math.round(planned.y);
+				}
+			}
+			this.updateManagedConnectorSides(data, nextState, new Set([...spacing.movedIds, nodeId]));
 		});
 		if (!transaction) return false;
-		attachChild(this.state, nodeId, parentId, edgeId, order);
+		this.state = nextState;
 		const root = rootOf(this.state, parentId);
 		ensureTreePreference(this.state, root, this.state.defaultLayout);
 		if (mode === "balanced" && parentId === root) {
@@ -840,7 +899,7 @@ export class CanvasController {
 			else assignMissingBalancedSides(this.adapter.getData(), this.state, root, this.options.verticalGap ?? 50);
 		}
 		this.commitState();
-		this.finishCreation(nodeId, root);
+		this.finishCreation(nodeId);
 		return true;
 	}
 
@@ -873,20 +932,35 @@ export class CanvasController {
 		const edge = this.createEdge(edgeId, parent, child);
 		const sourceOrder = this.state.relations[nodeId]?.order ?? relationChildren(this.state, parentId).length;
 		const order = direction === "before" ? sourceOrder - 0.5 : sourceOrder + 0.5;
+		const nextState = cloneJson(this.state);
+		attachChild(nextState, newId, parentId, edgeId, order);
+		const candidateData = cloneJson(data);
+		candidateData.nodes.push(child);
+		candidateData.edges.push(edge);
+		const movingIds = new Set<NodeId>([newId]);
+		const spacing = this.spaceMakingPlan(candidateData, nextState, movingIds);
 		const transaction = this.adapter.transaction(
 			direction === "before" ? "Create previous sibling" : "Create next sibling",
 			(next) => {
 				next.nodes.push(child);
 				next.edges.push(edge);
+				for (const node of next.nodes) {
+					const planned = spacing.positions[node.id];
+					if (planned && !movingIds.has(node.id)) {
+						node.x = Math.round(planned.x);
+						node.y = Math.round(planned.y);
+					}
+				}
+				this.updateManagedConnectorSides(next, nextState, new Set([...spacing.movedIds, newId]));
 			},
 		);
 		if (!transaction) return false;
-		attachChild(this.state, newId, parentId, edgeId, order);
+		this.state = nextState;
 		if (mode === "balanced" && parentId === rootOf(this.state, parentId) && side) {
 			ensureTreePreference(this.state, parentId).branchSides[newId] = side;
 		}
 		this.commitState();
-		this.finishCreation(newId, rootOf(this.state, parentId));
+		this.finishCreation(newId);
 		return true;
 	}
 
@@ -900,16 +974,26 @@ export class CanvasController {
 			? { x: selectedNode.x + 40, y: selectedNode.y + 40 }
 			: { x: 0, y: 0 };
 		const node = this.newTextNode(undefined, nodeId, position);
+		const candidateData = cloneJson(this.adapter.getData());
+		candidateData.nodes.push(node);
+		const movingIds = new Set<NodeId>([nodeId]);
+		const spacing = this.spaceMakingPlan(candidateData, this.state, movingIds);
 		const transaction = this.adapter.transaction("Create floating node", (data) => {
 			data.nodes.push(node);
+			for (const current of data.nodes) {
+				const planned = spacing.positions[current.id];
+				if (planned && !movingIds.has(current.id)) {
+					current.x = Math.round(planned.x);
+					current.y = Math.round(planned.y);
+				}
+			}
 		});
 		if (!transaction) return false;
 		this.finishCreation(nodeId);
 		return true;
 	}
 
-	private finishCreation(nodeId: NodeId, rootId?: NodeId): void {
-		if (this.state.autoLayout && rootId) this.layoutTree(rootId);
+	private finishCreation(nodeId: NodeId): void {
 		this.applyVisibility();
 		this.refreshControls();
 		this.adapter.selectOnly(nodeId);
@@ -990,16 +1074,25 @@ export class CanvasController {
 		if (rootLayout === "balanced") {
 			assignMissingBalancedSides(nextData, nextState, rootOf(nextState, selected), this.options.verticalGap ?? 50);
 		}
+		const movingIds = new Set(createdIds);
+		const spacing = this.spaceMakingPlan(nextData, nextState, movingIds);
 		const transaction = this.adapter.transaction("Split headings into mind-map cards", (next) => {
 			const target = next.nodes.find((node) => node.id === selected);
 			if (target) target.text = sourceNode.text;
 			next.nodes.push(...nextData.nodes.filter((node) => !data.nodes.some((existing) => existing.id === node.id)));
 			next.edges.push(...nextData.edges.filter((edge) => !data.edges.some((existing) => existing.id === edge.id)));
+			for (const node of next.nodes) {
+				const planned = spacing.positions[node.id];
+				if (planned && !movingIds.has(node.id)) {
+					node.x = Math.round(planned.x);
+					node.y = Math.round(planned.y);
+				}
+			}
+			this.updateManagedConnectorSides(next, nextState, new Set([...spacing.movedIds, ...createdIds]));
 		});
 		if (!transaction) return false;
 		this.state = nextState;
 		this.commitState();
-		if (this.state.autoLayout) this.layoutTree(rootOf(this.state, selected));
 		this.adapter.selectOnly(createdIds[0] ?? selected);
 		this.refreshControls();
 		return true;
@@ -1354,9 +1447,22 @@ export class CanvasController {
 		const result = duplicateBranch(data, this.state, target, (kind, oldId) =>
 			randomId(`canvas-mindmap-${kind}`, kind === "node" ? ids.nodeIds : ids.edgeIds),
 		);
+		const candidateData = cloneJson(data);
+		candidateData.nodes.push(...result.nodes);
+		candidateData.edges.push(...result.edges);
+		const movingIds = new Set(result.nodes.map((node) => node.id));
+		const spacing = this.spaceMakingPlan(candidateData, result.state, movingIds);
 		const transaction = this.adapter.transaction("Duplicate branch", (next) => {
 			next.nodes.push(...result.nodes);
 			next.edges.push(...result.edges);
+			for (const node of next.nodes) {
+				const planned = spacing.positions[node.id];
+				if (planned && !movingIds.has(node.id)) {
+					node.x = Math.round(planned.x);
+					node.y = Math.round(planned.y);
+				}
+			}
+			this.updateManagedConnectorSides(next, result.state, new Set([...spacing.movedIds, ...movingIds]));
 		});
 		if (!transaction) return false;
 		this.state = result.state;
@@ -1419,14 +1525,17 @@ export class CanvasController {
 		const affectedRoots = [oldRoot, root].filter((rootId, index, all) =>
 			all.indexOf(rootId) === index && roots(data, nextState).includes(rootId),
 		);
-		const plannedLayout = this.state.autoLayout
+		const plannedLayout = this.state.autoLayout && !historyBaseline?.preservePositions
 			? calculateLayout(data, nextState, {
 				horizontalGap: this.options.horizontalGap ?? 200,
 				verticalGap: this.options.verticalGap ?? 50,
 				rootIds: affectedRoots,
 			})
 			: undefined;
-		const affectedBranch = new Set(descendants(nextState, childId, true));
+		const affectedBranch = new Set([
+			...descendants(nextState, childId, true),
+			...(historyBaseline?.affectedNodeIds ?? []),
+		]);
 		const transaction = this.adapter.transaction("Reparent branch", (next) => {
 			const edge = {
 				...(previousEdge ? cloneJson(previousEdge) : {}),
@@ -1497,6 +1606,7 @@ export class CanvasController {
 			return;
 		}
 
+		const beforeData = this.adapter.getData();
 		const selected = this.adapter.selectionIds().filter((id) => !!this.adapter.node(id));
 		const selectedIds = selected.includes(nodeId) ? selected : [nodeId];
 		const directSelection = new Set(selectedIds);
@@ -1513,16 +1623,27 @@ export class CanvasController {
 			const node = this.adapter.node(branchId);
 			if (node) positions[branchId] = { x: node.x, y: node.y };
 		}
+		const initialPositions: Record<NodeId, Point> = {};
+		for (const node of beforeData.nodes) initialPositions[node.id] = { x: node.x, y: node.y };
+		const hidden = hiddenNodeIds(this.state);
+		const spaceNodeIds = beforeData.nodes
+			.filter((node) => node.type !== "group" && !hidden.has(node.id))
+			.map((node) => node.id);
+		const parentById: Record<NodeId, NodeId | undefined> = {};
+		for (const [childId, relation] of Object.entries(this.state.relations)) parentById[childId] = relation.parentId;
 		this.drag = {
 			nodeId,
 			pointerId: event.pointerId,
 			startClient: { x: event.clientX, y: event.clientY },
-			beforeData: this.adapter.getData(),
+			beforeData,
 			beforeState: cloneJson(this.state),
 			branchIds,
 			directSelection,
 			movementRoots,
 			positions,
+			initialPositions,
+			spaceGroups: buildSpaceMakingGroups(spaceNodeIds, branchIds, parentById),
+			spaceMovedIds: new Set(),
 			modifier: event.metaKey || event.ctrlKey || event.altKey,
 			active: false,
 			canReparent: directSelection.size === 1 && directSelection.has(nodeId) &&
@@ -1556,12 +1677,9 @@ export class CanvasController {
 		const drag = this.drag;
 		if (!drag?.nativeLifecycle || drag.pointerId !== event.pointerId) return;
 		drag.modifierDuringDrag = event.metaKey || event.ctrlKey || event.altKey;
-		if (drag.modifierDuringDrag) {
-			this.updateContactHighlight(drag, undefined);
-			return;
-		}
+		this.updateContactTarget(drag);
 		this.syncDraggedBranch(drag);
-		this.updateContactHighlight(drag, this.findContactTarget(drag));
+		this.updateContactTarget(drag);
 	}
 
 	private onNativeDragEnd(event: PointerEvent): void {
@@ -1573,8 +1691,8 @@ export class CanvasController {
 		if (!drag?.nativeLifecycle || (event && drag.pointerId !== event.pointerId)) return;
 		if (drag.frame !== undefined) this.win.cancelAnimationFrame(drag.frame);
 		this.restoreDraggedBranch(drag);
+		this.clearContactState(drag);
 		this.drag = undefined;
-		this.clearContactHighlight();
 	}
 
 	private onPointerMove = (event: PointerEvent): void => {
@@ -1606,7 +1724,6 @@ export class CanvasController {
 		}
 		if (!drag.active) return;
 		event.preventDefault();
-		if (drag.modifierDuringDrag) this.updateContactHighlight(drag, undefined);
 		this.scheduleDragFrame();
 	};
 
@@ -1624,23 +1741,29 @@ export class CanvasController {
 	private finishDrag(event: PointerEvent): void {
 		const drag = this.drag;
 		if (!drag || drag.pointerId !== event.pointerId) return;
-		this.drag = undefined;
 		if (drag.frame !== undefined) this.win.cancelAnimationFrame(drag.frame);
-		this.syncDraggedBranch(drag);
 		drag.modifierDuringDrag = event.metaKey || event.ctrlKey || event.altKey;
+		if (drag.modifierDuringDrag && drag.connectionTargetId) {
+			drag.connectionTargetId = undefined;
+			this.cancelContactTimer(drag);
+			this.applySpaceMaking(drag);
+		}
+		this.syncDraggedBranch(drag);
 		const targetId = drag.active && !drag.modifier && !drag.modifierDuringDrag &&
-			!event.metaKey && !event.ctrlKey && !event.altKey
-			? this.findContactTarget(drag)
+			drag.connectionTargetId && this.findContactTarget(drag) === drag.connectionTargetId
+			? drag.connectionTargetId
 			: undefined;
-		this.clearContactHighlight();
+		this.clearContactState(drag);
+		this.drag = undefined;
 		if (!this.state.enabled || !drag.active) return;
 		const moved = this.branchMoved(drag);
 		const suppressed = !drag.canReparent || this.adapter.capabilities.readOnly || drag.modifier ||
 			drag.modifierDuringDrag || event.metaKey || event.ctrlKey || event.altKey;
 		if (!targetId || suppressed) {
 			if (moved) {
+				const affected = new Set([...drag.branchIds, ...drag.spaceMovedIds]);
 				const routed = this.adapter.transaction("Route moved branch connectors", (next) =>
-					this.updateManagedConnectorSides(next, this.state, drag.branchIds));
+					this.updateManagedConnectorSides(next, this.state, affected));
 				if (!routed) this.adapter.requestSave();
 			}
 			return;
@@ -1649,6 +1772,8 @@ export class CanvasController {
 		this.reparentNode(drag.nodeId, targetId, side, {
 			beforeData: drag.beforeData,
 			beforeState: drag.beforeState,
+			preservePositions: true,
+			affectedNodeIds: new Set([...drag.branchIds, ...drag.spaceMovedIds]),
 		});
 	}
 
@@ -1658,9 +1783,9 @@ export class CanvasController {
 			const drag = this.drag;
 			if (drag.frame !== undefined) this.win.cancelAnimationFrame(drag.frame);
 			this.restoreDraggedBranch(drag);
+			this.clearContactState(drag);
 			this.drag = undefined;
 		}
-		this.clearContactHighlight();
 	};
 
 	private onWindowBlur = (): void => {
@@ -1719,7 +1844,7 @@ export class CanvasController {
 			if (!this.drag) return;
 			this.drag.frame = undefined;
 			this.syncDraggedBranch(this.drag);
-			this.updateContactHighlight(this.drag, this.findContactTarget(this.drag));
+			this.updateContactTarget(this.drag);
 		});
 	}
 
@@ -1737,13 +1862,60 @@ export class CanvasController {
 				y: original.y + root.y - originalRoot.y,
 			});
 		}
+		this.applySpaceMaking(drag);
 		this.adapter.requestFrame();
 	}
 
+	private applySpaceMaking(drag: DragSnapshot): void {
+		if (!this.state.autoLayout || drag.spaceGroups.length === 0) {
+			drag.spaceMovedIds = new Set();
+			return;
+		}
+		const hidden = hiddenNodeIds(this.state);
+		const nodes: SpaceMakingNode[] = drag.beforeData.nodes
+			.filter((node) => node.type !== "group" && !hidden.has(node.id))
+			.map((node) => ({
+				id: node.id,
+				x: drag.initialPositions[node.id]?.x ?? node.x,
+				y: drag.initialPositions[node.id]?.y ?? node.y,
+				width: node.width,
+				height: node.height,
+			}));
+		const movingPositions: Record<NodeId, Point> = {};
+		for (const movingId of drag.branchIds) {
+			const node = this.adapter.node(movingId);
+			if (node) movingPositions[movingId] = { x: node.x, y: node.y };
+		}
+		const protectedGroupIds = new Set<NodeId>();
+		if (drag.connectionTargetId) {
+			const targetGroup = drag.spaceGroups.find((group) => group.memberIds.includes(drag.connectionTargetId!));
+			if (targetGroup) protectedGroupIds.add(targetGroup.id);
+		}
+		const result = resolveSpaceMaking(
+			nodes,
+			drag.branchIds,
+			movingPositions,
+			drag.spaceGroups,
+			{ protectedGroupIds },
+		);
+		const movedIds = new Set<NodeId>();
+		for (const [nodeId, position] of Object.entries(result.positions)) {
+			const node = this.adapter.node(nodeId);
+			if (!node) continue;
+			const original = drag.initialPositions[nodeId];
+			if (original && (Math.abs(position.x - original.x) > 0.5 || Math.abs(position.y - original.y) > 0.5)) {
+				movedIds.add(nodeId);
+			}
+			if (Math.abs(node.x - position.x) > 0.5 || Math.abs(node.y - position.y) > 0.5) {
+				this.adapter.moveNode(nodeId, position);
+			}
+		}
+		drag.spaceMovedIds = movedIds;
+	}
+
 	private restoreDraggedBranch(drag: DragSnapshot): void {
-		for (const branchId of drag.branchIds) {
-			const original = drag.positions[branchId];
-			if (original) this.adapter.moveNode(branchId, original);
+		for (const [nodeId, original] of Object.entries(drag.initialPositions)) {
+			this.adapter.moveNode(nodeId, original);
 		}
 		this.adapter.requestFrame();
 	}
@@ -1780,25 +1952,63 @@ export class CanvasController {
 					node.id !== drag.nodeId && !drag.branchIds.has(node.id) && !hidden.has(node.id);
 			})
 			.map((node) => {
-				const bounds = this.nodeBounds(node.id);
+				const original = drag.initialPositions[node.id];
+				const dataNode = dataById.get(node.id);
+				const bounds = original && dataNode
+					? {
+						left: original.x,
+						top: original.y,
+						right: original.x + dataNode.width,
+						bottom: original.y + dataNode.height,
+					}
+					: undefined;
 				return bounds ? { id: node.id, bounds, eligible: canReparent(this.state, drag.nodeId, node.id) } : undefined;
 			})
 			.filter((candidate): candidate is { id: NodeId; bounds: Rect; eligible: boolean } => !!candidate);
 		return findContactParent(draggedBounds, candidates, drag.branchIds);
 	}
 
-	private updateContactHighlight(drag: DragSnapshot, targetId?: NodeId): void {
-		if (targetId === drag.contactTargetId) {
-			if (targetId) this.adapter.node(targetId)?.nodeEl?.classList.add("canvas-mindmap-drop-target");
-			return;
+	private updateContactTarget(drag: DragSnapshot): void {
+		const candidate = drag.modifierDuringDrag ? undefined : this.findContactTarget(drag);
+		if (candidate !== drag.contactCandidateId) {
+			this.cancelContactTimer(drag);
+			drag.contactCandidateId = candidate;
+			drag.connectionTargetId = undefined;
+			drag.contactTargetId = undefined;
+			this.clearContactHighlight();
+			if (candidate) {
+				drag.contactTimer = this.win.setTimeout(() => {
+					drag.contactTimer = undefined;
+					if (this.drag !== drag || drag.contactCandidateId !== candidate || drag.modifierDuringDrag) return;
+					drag.connectionTargetId = candidate;
+					drag.contactTargetId = candidate;
+					this.applySpaceMaking(drag);
+					this.showContactHighlight(candidate);
+				}, 500);
+			}
 		}
+		if (drag.connectionTargetId) this.showContactHighlight(drag.connectionTargetId);
+	}
+
+	private showContactHighlight(targetId: NodeId): void {
 		this.clearContactHighlight();
-		drag.contactTargetId = targetId;
-		if (!targetId) return;
 		const element = this.adapter.node(targetId)?.nodeEl;
 		if (!element) return;
 		element.classList.add("canvas-mindmap-drop-target");
 		element.setAttribute("data-canvas-mindmap-drop-target", "true");
+	}
+
+	private cancelContactTimer(drag: DragSnapshot): void {
+		if (drag.contactTimer !== undefined) this.win.clearTimeout(drag.contactTimer);
+		drag.contactTimer = undefined;
+	}
+
+	private clearContactState(drag: DragSnapshot): void {
+		this.cancelContactTimer(drag);
+		drag.contactCandidateId = undefined;
+		drag.connectionTargetId = undefined;
+		drag.contactTargetId = undefined;
+		this.clearContactHighlight();
 	}
 
 	private clearContactHighlight(): void {
@@ -1848,8 +2058,8 @@ export class CanvasController {
 		this.cancelPan();
 		if (this.drag?.frame !== undefined) this.win.cancelAnimationFrame(this.drag.frame);
 		if (this.drag) this.restoreDraggedBranch(this.drag);
+		if (this.drag) this.clearContactState(this.drag);
 		this.drag = undefined;
-		this.clearContactHighlight();
 	}
 
 	private isCanvasBackground(element: Element): boolean {

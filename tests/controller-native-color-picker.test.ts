@@ -247,6 +247,196 @@ test("ordinary card clicks replace selection and empty-space clicks clear it", a
 	controller.dispose();
 });
 
+test("dragging a card makes nearby cards move aside and return when the path clears", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	window.document.body.append(wrapper);
+	const movingElement = window.document.createElement("div");
+	movingElement.className = "canvas-node";
+	const nearbyElement = window.document.createElement("div");
+	nearbyElement.className = "canvas-node";
+	wrapper.append(movingElement, nearbyElement);
+	const moving: any = { id: "moving", x: 0, y: 0, width: 100, height: 60, type: "text", nodeEl: movingElement };
+	const nearby: any = { id: "nearby", x: 110, y: 0, width: 100, height: 60, type: "text", nodeEl: nearbyElement };
+	const data: any = { nodes: [moving, nearby], edges: [] };
+	const selection = new Set<any>([moving]);
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: new Map([[moving.id, moving], [nearby.id, nearby]]),
+		selection,
+		getData: () => data,
+		importData: (next: any) => {
+			data.nodes = next.nodes;
+			data.edges = next.edges;
+		},
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		deselectAll: () => selection.clear(),
+		handleSelectionDrag: (_event: any, _target: any, node: any) => ({
+			move: (event: any) => {
+				node.x = event.clientX;
+				node.y = event.clientY;
+			},
+			end: () => undefined,
+		}),
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: true,
+			autoHeight: false,
+			defaultLayout: "balanced" as const,
+			trees: {},
+			relations: {},
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+	});
+	controller.mount();
+
+	movingElement.dispatchEvent(new window.PointerEvent("pointerdown", {
+		bubbles: true,
+		cancelable: true,
+		isPrimary: true,
+		pointerType: "mouse",
+		button: 0,
+		pointerId: 9,
+	}));
+	const start = new window.PointerEvent("pointerdown", { pointerId: 9, clientX: 0, clientY: 0 });
+	const callbacks = canvas.handleSelectionDrag(start, movingElement, moving);
+	callbacks.move(new window.PointerEvent("pointermove", { pointerId: 9, clientX: 20, clientY: 0 }));
+	assert.equal(nearby.x, 144);
+	callbacks.move(new window.PointerEvent("pointermove", { pointerId: 9, clientX: 0, clientY: 0 }));
+	assert.equal(nearby.x, 110);
+	callbacks.end(new window.PointerEvent("pointerup", { pointerId: 9, clientX: 0, clientY: 0 }));
+	controller.dispose();
+});
+
+test("a connection target is highlighted only after the hold delay", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	window.document.body.append(wrapper);
+	const movingElement = window.document.createElement("div");
+	movingElement.className = "canvas-node";
+	const targetElement = window.document.createElement("div");
+	targetElement.className = "canvas-node";
+	wrapper.append(movingElement, targetElement);
+	const moving: any = { id: "moving", x: 0, y: 0, width: 100, height: 60, type: "text", nodeEl: movingElement };
+	const target: any = { id: "target", x: 110, y: 0, width: 100, height: 60, type: "text", nodeEl: targetElement };
+	const data: any = { nodes: [moving, target], edges: [] };
+	const selection = new Set<any>([moving]);
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: new Map([[moving.id, moving], [target.id, target]]),
+		selection,
+		getData: () => data,
+		importData: (next: any) => { data.nodes = next.nodes; data.edges = next.edges; },
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		deselectAll: () => selection.clear(),
+		handleSelectionDrag: (_event: any, _target: any, node: any) => ({
+			move: (event: any) => { node.x = event.clientX; node.y = event.clientY; },
+			end: () => undefined,
+		}),
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: true,
+			autoHeight: false,
+			defaultLayout: "balanced" as const,
+			trees: {},
+			relations: {},
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+	});
+	controller.mount();
+	movingElement.dispatchEvent(new window.PointerEvent("pointerdown", {
+		bubbles: true,
+		cancelable: true,
+		isPrimary: true,
+		pointerType: "mouse",
+		button: 0,
+		pointerId: 10,
+	}));
+	const callbacks = canvas.handleSelectionDrag(new window.PointerEvent("pointerdown", { pointerId: 10 }), movingElement, moving);
+	callbacks.move(new window.PointerEvent("pointermove", { pointerId: 10, clientX: 20, clientY: 0 }));
+	assert.equal(targetElement.classList.contains("canvas-mindmap-drop-target"), false);
+	await new Promise((resolve) => setTimeout(resolve, 550));
+	assert.equal(targetElement.classList.contains("canvas-mindmap-drop-target"), true);
+	assert.equal(target.x, 110);
+	callbacks.cancel?.(new window.PointerEvent("pointercancel", { pointerId: 10 }));
+	controller.dispose();
+});
+
+test("creating a child makes room at its intended insertion point", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	window.document.body.append(wrapper);
+	const parentElement = window.document.createElement("div");
+	parentElement.className = "canvas-node";
+	const nearbyElement = window.document.createElement("div");
+	nearbyElement.className = "canvas-node";
+	wrapper.append(parentElement, nearbyElement);
+	const parent: any = { id: "parent", x: 0, y: 0, width: 100, height: 60, type: "text", nodeEl: parentElement };
+	const nearby: any = { id: "nearby", x: 450, y: 0, width: 100, height: 60, type: "text", nodeEl: nearbyElement };
+	const data: any = { nodes: [parent, nearby], edges: [] };
+	const selection = new Set<any>([parent]);
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: new Map([[parent.id, parent], [nearby.id, nearby]]),
+		selection,
+		getData: () => data,
+		importData: (next: any) => { data.nodes = next.nodes; data.edges = next.edges; },
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		deselectAll: () => selection.clear(),
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: true,
+			autoHeight: false,
+			defaultLayout: "balanced" as const,
+			trees: {},
+			relations: {},
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+	});
+	controller.mount();
+
+	assert.equal(controller.createChild("parent"), true);
+	assert.equal(data.nodes.some((node: any) => node.id.startsWith("canvas-mindmap-node-")), true);
+	assert.equal(data.nodes.find((node: any) => node.id === "nearby").x, 524);
+	controller.dispose();
+});
+
 test("clicking Arrange mind map moves the selected tree and reports success", async () => {
 	const { Controller, window } = await loadController();
 	const wrapper = window.document.createElement("div");
