@@ -56,6 +56,13 @@ test("native picker receives pastel swatches and applies the selected colour", a
 
 	assert.ok(handle);
 	assert.equal(submenu.querySelectorAll(".canvas-mindmap-native-color-swatch").length, PASTEL_COLORS.length);
+	const renderedColours = Array.from(submenu.querySelectorAll(".canvas-mindmap-native-color-swatch") as any[])
+		.map((element: any) => element.style.getPropertyValue("background-color"));
+	assert.deepEqual(renderedColours, PASTEL_COLORS.map((color) => color.hex));
+	assert.equal(
+		(submenu.querySelector(".canvas-mindmap-native-color-swatch") as any)?.style.getPropertyValue("background-image"),
+		"none",
+	);
 	assert.equal(
 		Array.from(submenu.querySelectorAll(".canvas-color-picker-item:not(.canvas-color-picker-custom)"))
 			.filter((item: any) => item.hidden).length,

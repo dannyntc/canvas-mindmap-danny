@@ -155,6 +155,12 @@ export function enhanceNativeColorPicker(
 		button.type = "button";
 		button.className = "canvas-mindmap-native-color-swatch";
 		button.style.setProperty("--canvas-mindmap-swatch", color.hex);
+		// Obsidian's native submenu applies theme button rules with selectors
+		// that can override the plugin stylesheet. Paint the actual colour on
+		// the element as well so the swatch cannot silently fall back to grey.
+		button.style.setProperty("background-color", color.hex, "important");
+		button.style.setProperty("background-image", "none", "important");
+		button.style.setProperty("opacity", "1", "important");
 		button.setAttribute("aria-label", `Pastel colour: ${color.label}`);
 		button.setAttribute("title", color.label);
 		button.setAttribute("aria-pressed", String(options.currentColor === color.hex));
