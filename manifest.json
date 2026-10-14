@@ -1,7 +1,7 @@
 {
 	"id": "canvas-mindmap-danny",
 	"name": "Canvas-Mindmap-Danny",
-	"version": "1.1.12",
+	"version": "1.1.13",
 	"minAppVersion": "1.14.4",
 	"description": "A plugin to make your canvas work like a mindmap.",
 	"author": "Danny",

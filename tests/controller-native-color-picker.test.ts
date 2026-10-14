@@ -246,3 +246,68 @@ test("ordinary card clicks replace selection and empty-space clicks clear it", a
 
 	controller.dispose();
 });
+
+test("clicking Arrange mind map moves the selected tree and reports success", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	const controls = window.document.createElement("div");
+	controls.className = "canvas-controls";
+	const history = window.document.createElement("div");
+	history.className = "canvas-control-item";
+	history.setAttribute("aria-label", "Undo");
+	controls.append(history);
+	wrapper.append(controls);
+	window.document.body.append(wrapper);
+
+	let data: any = {
+		nodes: [
+			{ id: "root", x: 100, y: 100, width: 120, height: 80, type: "text", text: "Root" },
+			{ id: "child", x: 700, y: 700, width: 100, height: 60, type: "text", text: "Child" },
+		],
+		edges: [{ id: "edge", fromNode: "root", fromSide: "right", toNode: "child", toSide: "left" }],
+	};
+	const root = { ...data.nodes[0] };
+	const child = { ...data.nodes[1] };
+	const selection = new Set<any>([child]);
+	const notices: string[] = [];
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: new Map([[root.id, root], [child.id, child]]),
+		selection,
+		getData: () => data,
+		importData: (next: any) => { data = next; },
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		deselectAll: () => selection.clear(),
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: false,
+			autoHeight: false,
+			defaultLayout: "left-to-right" as const,
+			trees: { root: { layout: "left-to-right", branchSides: {} } },
+			relations: { child: { parentId: "root", edgeId: "edge", order: 0 } },
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+		notify: (message: string) => notices.push(message),
+	});
+	controller.mount();
+
+	const arrange = wrapper.querySelector("[data-canvas-mindmap-action='arrange']") as HTMLButtonElement | null;
+	assert.ok(arrange);
+	arrange.click();
+
+	assert.equal(data.nodes.find((node: any) => node.id === "child").x, 420);
+	assert.deepEqual(notices, ["Mind map arranged."]);
+	controller.dispose();
+});

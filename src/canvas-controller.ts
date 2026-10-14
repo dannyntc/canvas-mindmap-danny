@@ -118,6 +118,8 @@ interface ColorPaletteTarget {
 	edgeIds: ReadonlySet<string>;
 }
 
+type LayoutOutcome = "changed" | "unchanged" | "failed";
+
 function randomId(prefix: string, used: Set<string>): string {
 	let id = "";
 	while (!id || used.has(id)) {
@@ -169,6 +171,7 @@ export class CanvasController {
 	private removeDataImportHook?: () => void;
 	private historySyncTimer?: number;
 	private lastCanvasStructureKey?: string;
+	private layoutOutcome: LayoutOutcome = "unchanged";
 
 	private get win(): Window {
 		return this.view.containerEl.ownerDocument.defaultView ?? window;
@@ -1044,16 +1047,27 @@ export class CanvasController {
 	}
 
 	arrangeNeatly(): boolean {
-		if (!this.state.enabled || this.adapter.capabilities.readOnly) return false;
-		const rootsInSelection = layoutRootsForSelection(
-			this.adapter.selectionIds(),
-			this.adapter.getData(),
-			this.state,
-		);
-		return this.applyLayout(
-			rootsInSelection.length > 0 ? rootsInSelection : undefined,
+		if (!this.state.enabled || this.adapter.capabilities.readOnly) {
+			this.notify("Arrange mind map is unavailable in this Canvas.");
+			return false;
+		}
+		const data = this.adapter.getData();
+		const selectedIds = this.adapter.selectionIds();
+		const selectedCardIds = selectedIds.filter((id) => data.nodes.some((node) => node.id === id));
+		const rootsInSelection = layoutRootsForSelection(selectedCardIds, data, this.state);
+		const connectedRoots = rootsInSelection.filter((rootId) => relationChildren(this.state, rootId).length > 0);
+		if (selectedCardIds.length > 0 && connectedRoots.length === 0) {
+			this.notify("This card has no connected branch to arrange.");
+			return false;
+		}
+		const arranged = this.applyLayout(
+			selectedCardIds.length > 0 ? connectedRoots : undefined,
 			"Arrange mind map",
 		);
+		if (arranged) this.notify("Mind map arranged.");
+		else if (this.layoutOutcome === "failed") this.notify("Mind map could not be arranged because Canvas rejected the update.");
+		else this.notify("Mind map is already arranged.");
+		return arranged;
 	}
 
 	setTreeLayout(mode: LayoutMode, nodeId?: NodeId): boolean {
@@ -1079,6 +1093,7 @@ export class CanvasController {
 	}
 
 	private applyLayout(rootIds?: NodeId[], label = "Layout mind-map tree"): boolean {
+		this.layoutOutcome = "unchanged";
 		const data = this.adapter.getData();
 		const result = calculateLayout(data, this.state, {
 			horizontalGap: this.options.horizontalGap ?? 200,
@@ -1117,8 +1132,24 @@ export class CanvasController {
 					edge.toSide = result.edgeSides[edge.id].toSide;
 				}
 			}
+		}, (_before, _requested, after) => {
+			for (const node of after.nodes) {
+				const position = result.positions[node.id];
+				if (position && allowed.has(node.id) &&
+					(node.x !== Math.round(position.x) || node.y !== Math.round(position.y))) return false;
+			}
+			for (const edge of after.edges) {
+				const sides = result.edgeSides[edge.id];
+				if (sides && childByEdge.has(edge.id) &&
+					(edge.fromSide !== sides.fromSide || edge.toSide !== sides.toSide)) return false;
+			}
+			return true;
 		});
-		if (!transaction) return false;
+		if (!transaction) {
+			this.layoutOutcome = changed ? "failed" : "unchanged";
+			return false;
+		}
+		this.layoutOutcome = "changed";
 		this.adapter.requestFrame();
 		this.applyVisibility();
 		this.refreshControls();
