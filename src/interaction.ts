@@ -61,6 +61,36 @@ export function findCanvasControlContainers(roots: readonly HTMLElement[]): HTML
 	return containers;
 }
 
+/**
+ * Identify native Canvas history controls without relying on one locale or
+ * one Obsidian icon class name.
+ */
+export function isCanvasHistoryControl(element: HTMLElement): boolean {
+	const icons = Array.from(element.querySelectorAll<HTMLElement>(
+		"svg, [data-lucide], .svg-icon",
+	));
+	const semanticText = [
+		element.getAttribute("aria-label"),
+		element.getAttribute("title"),
+		element.getAttribute("data-tooltip"),
+		element.getAttribute("data-tooltip-content"),
+		String(element.className ?? ""),
+		...icons.map((icon) => `${icon.getAttribute("data-lucide") ?? ""} ${String(icon.className ?? "")}`),
+	].filter(Boolean).join(" ").toLowerCase();
+	return /(?:^|[\s_-])(undo|redo)(?:[\s_-]|$)/.test(semanticText);
+}
+
+/**
+ * Return the last native Undo/Redo control so plugin actions can be placed
+ * directly after the editing-history group.
+ */
+export function findCanvasHistoryAnchor(container: HTMLElement): HTMLElement | undefined {
+	const controls = Array.from(container.querySelectorAll<HTMLElement>(
+		".canvas-control-item, button, [role='button']",
+	));
+	return [...controls].reverse().find(isCanvasHistoryControl);
+}
+
 export function rectanglesTouch(first: Rect, second: Rect): boolean {
 	return first.left <= second.right &&
 		first.right >= second.left &&

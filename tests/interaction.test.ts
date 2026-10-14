@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
 	findContactParent,
 	findCanvasControlContainers,
+	findCanvasHistoryAnchor,
 	hasStructuralCanvasMutation,
 	hasPassedDragThreshold,
 	intersectionArea,
@@ -76,4 +77,34 @@ test("Canvas control discovery searches unique view host roots", () => {
 		findCanvasControlContainers([firstRoot, firstRoot, secondRoot]),
 		[controlA, controlB],
 	);
+});
+
+test("Canvas history anchor selects the last undo or redo control", () => {
+	const control = (label: string, icon = "") => ({
+		className: icon ? `lucide-${icon}` : "canvas-control-item",
+		getAttribute: (name: string) => name === "aria-label" ? label : null,
+		querySelectorAll: () => [],
+	}) as unknown as HTMLElement;
+	const fit = control("Fit to view", "maximize");
+	const undo = control("Undo", "undo-2");
+	const redo = control("Redo", "redo-2");
+	const help = control("Help", "help-circle");
+	const container = {
+		querySelectorAll: () => [fit, undo, redo, help],
+	} as unknown as HTMLElement;
+
+	assert.equal(findCanvasHistoryAnchor(container), redo);
+});
+
+test("Canvas history anchor falls back when undo and redo are unavailable", () => {
+	const fit = {
+		className: "lucide-maximize",
+		getAttribute: (name: string) => name === "aria-label" ? "Fit to view" : null,
+		querySelectorAll: () => [],
+	} as unknown as HTMLElement;
+	const container = {
+		querySelectorAll: () => [fit],
+	} as unknown as HTMLElement;
+
+	assert.equal(findCanvasHistoryAnchor(container), undefined);
 });

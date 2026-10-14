@@ -9,6 +9,7 @@ import { HeightController } from "./height-controller";
 import {
 	findContactParent,
 	findCanvasControlContainers,
+	findCanvasHistoryAnchor,
 	hasPassedDragThreshold,
 	hasStructuralCanvasMutation,
 	panViewport,
@@ -385,6 +386,7 @@ export class CanvasController {
 		);
 		if (existing) {
 			this.arrangeControl = existing;
+			this.positionArrangeControl(controls, existing);
 			return;
 		}
 		this.removeArrangeControl();
@@ -401,8 +403,19 @@ export class CanvasController {
 			event.stopPropagation();
 			this.arrangeNeatly();
 		});
-		controls.append(button);
+		this.positionArrangeControl(controls, button);
 		this.arrangeControl = button;
+	}
+
+	private positionArrangeControl(controls: HTMLElement, button: HTMLButtonElement): void {
+		const historyAnchor = findCanvasHistoryAnchor(controls);
+		if (historyAnchor) {
+			if (historyAnchor.nextElementSibling !== button) {
+				historyAnchor.insertAdjacentElement("afterend", button);
+			}
+			return;
+		}
+		if (controls.lastElementChild !== button) controls.append(button);
 	}
 
 	private removeArrangeControl(): void {

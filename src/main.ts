@@ -67,7 +67,7 @@ const DEFAULT_LEGACY_SETTINGS: LegacySettings = {
 	advanced: {
 		transferToCommands: false,
 		showChangelogAutomatically: true,
-		lastUpdatedVersion: "1.1.3",
+		lastUpdatedVersion: "1.1.4",
 	},
 };
 
@@ -288,12 +288,12 @@ export default class CanvasMindMapPlugin extends Plugin {
 		this.addCommand({
 			id: "open-changelog",
 			name: "Open Canvas Mindmap changelog",
-			callback: () => new Notice("Canvas Mindmap 1.1.3 improves the Arrange mind map sidebar action."),
+			callback: () => new Notice("Canvas Mindmap 1.1.4 improves the Arrange mind map sidebar order."),
 		});
 	}
 
 	async saveSettings(): Promise<void> {
-		this.settings.advanced.lastUpdatedVersion = "1.1.3";
+		this.settings.advanced.lastUpdatedVersion = "1.1.4";
 		const current = this.store.snapshot();
 		await this.saveData({ ...this.settings, ...current });
 	}
