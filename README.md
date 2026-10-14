@@ -53,4 +53,4 @@ Existing directed connections are adopted only when they form an unambiguous acy
 - `src/height-controller.ts` — debounced natural text measurement and resize observation.
 - `src/main.ts` — Obsidian lifecycle, commands, settings, and multi-view synchronization.
 
-The original installed 1.0.2 files are preserved in `baseline/` for comparison. No vault installation or publication is performed by this workspace handoff.
+The original installed 1.0.2 files are preserved in `baseline/` for comparison. The reconstructed commit and tag history is documented in [`docs/version-history.md`](docs/version-history.md), with machine-readable provenance in [`docs/reconstruction-manifest.json`](docs/reconstruction-manifest.json). This repository does not overwrite a vault installation.

@@ -1,0 +1,48 @@
+{
+  "repository": "dannyntc/canvas-mindmap-danny",
+  "workspace": "/Users/danny/Desktop/canvas-mindmap-danny",
+  "baseline": "v1.0.2",
+  "tags": [
+    "v1.0.2",
+    "v1.1.0",
+    "v1.1.1",
+    "v1.1.2",
+    "v1.1.3",
+    "v1.1.4",
+    "v1.1.5",
+    "v1.1.6",
+    "v1.1.7",
+    "v1.1.8",
+    "v1.1.9",
+    "v1.1.10",
+    "v1.1.11",
+    "v1.1.12",
+    "v1.1.13",
+    "v1.1.14"
+  ],
+  "fileChangeReplay": {
+    "sessionRootId": "01a135e7-f9cc-77f1-b0b8-3c530431db10",
+    "recordedFileChangeEvents": 213,
+    "appliedFileChanges": 267,
+    "replayErrors": 0,
+    "earlyVersionSource": "Codex session FileChange records",
+    "laterVersionSource": "Preserved exports under /Users/danny/Desktop/codex's outputs"
+  },
+  "authoritativeExportSha256": {
+    "1.1.5": "680c4391c2aa2d2894cc9b33c0637b60303add0fc3633941bf01f95b888d60e6",
+    "1.1.6": "c098f528d9b6552f74898e0cff56883a1838a9e9cebd134cb2da7381c2e30815",
+    "1.1.7": "c86d7931b212d9fd3ba263a810ab25efc73e4d8693fce8ff39dc24c1e0d5a942",
+    "1.1.8": "59bfe42e861f49f51d824e6f40ccd7cf639385b0bb2d0d909d650d9f1b188d9d",
+    "1.1.9": "5f0e801e05e958724a74e8b4942e067c5936ce34f2a613a14936cab4f0857a48",
+    "1.1.10": "abdedce6007fd37cc33c357f39e7b1b29172d5c1d9d40971a3cae7178cada8a4",
+    "1.1.11": "facc0eb296a65bcb7eb9a2ab12e63785c140a5006fdf937fae63b55bde7a8441",
+    "1.1.12": "f1da2199e168ab34d2fb6be172766706cc3d711c688333ecb7741570786266fa",
+    "1.1.13": "a6e202763ff9ebe2b00a65fdbf7ca8ce4fd1b3c7c23425fa07f664689bf4f0c9",
+    "1.1.14": "ec2aeccd77591373c11ea8810b35c994d7c0fc2f4a8894327733e7c37975e720"
+  },
+  "knownLimitations": [
+    "The identity rename was not itself present as a FileChange event and was applied at the first boundary whose recorded context required it.",
+    "The initial package-lock creation was not recorded as a FileChange; early checkpoints use reconstructed lock metadata, while later supplied exports are authoritative.",
+    "No live Obsidian desktop/vault runtime was available for native Canvas behavior verification."
+  ]
+}
