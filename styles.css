@@ -28,49 +28,6 @@
     margin-left: var(--size-2-2);
 }
 
-.canvas-mindmap-controls {
-    align-items: center;
-    display: flex;
-    gap: var(--size-2-1);
-    left: 50%;
-    opacity: 0;
-    padding: var(--size-2-1);
-    pointer-events: none;
-    position: absolute;
-    top: calc(100% + var(--size-2-1));
-    transform: translateX(-50%);
-    transition: opacity 100ms ease;
-    z-index: 10;
-}
-
-.canvas-node:hover > .canvas-mindmap-controls,
-.canvas-node:focus-within > .canvas-mindmap-controls,
-.canvas-mindmap-controls:focus-within {
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.canvas-mindmap-control {
-    align-items: center;
-    background: var(--background-primary);
-    border: 1px solid var(--background-modifier-border);
-    border-radius: var(--radius-s);
-    box-shadow: var(--shadow-s);
-    color: var(--text-normal);
-    display: inline-flex;
-    font-size: var(--font-ui-small);
-    height: var(--size-4-4);
-    justify-content: center;
-    min-width: var(--size-4-4);
-    padding: 0 var(--size-2-1);
-}
-
-.canvas-mindmap-control:hover,
-.canvas-mindmap-control:focus-visible {
-    background: var(--background-modifier-hover);
-    color: var(--text-accent);
-}
-
 .canvas-mindmap-hidden {
     visibility: hidden !important;
 }

@@ -410,8 +410,15 @@ export class CanvasAdapter {
 			beforeSelection,
 			afterSelection: this.selectionIds(),
 		};
+		try {
+			this.requestSave();
+		} catch {
+			// Do not leave a successfully imported snapshot without a matching
+			// save boundary. Restore the exact pre-transaction data instead.
+			this.writeData(beforeData);
+			return undefined;
+		}
 		this.lastTransaction = transaction;
-		this.requestSave();
 		return transaction;
 	}
 

@@ -7,6 +7,7 @@ import {
 } from "./canvas-adapter";
 import { applyCanvasColors, branchColorTargets } from "./color-actions";
 import { PASTEL_COLORS } from "./colors";
+import { ColorApplyResult, ColorPaletteHandle, openColorPalette } from "./color-palette";
 import { HeightController } from "./height-controller";
 import {
 	findContactParent,
@@ -42,7 +43,6 @@ import {
 	descendants,
 	duplicateBranch,
 	ensureTreePreference,
-	hiddenDescendantCount,
 	hiddenNodeIds,
 	parentOf,
 	relationChildren,
@@ -161,8 +161,7 @@ export class CanvasController {
 	private arrangeControl?: HTMLButtonElement;
 	private readonly historyStates = new Map<string, CanvasMindMapState>();
 	private readonly height: HeightController;
-	private colorPalette?: HTMLElement;
-	private colorPaletteCleanup?: () => void;
+	private colorPalette?: ColorPaletteHandle;
 	private removeNativeDragHook?: () => void;
 	private removeDataImportHook?: () => void;
 	private historySyncTimer?: number;
@@ -526,49 +525,6 @@ export class CanvasController {
 
 	private refreshControls(): void {
 		this.removeControls();
-		if (!this.state.enabled) return;
-		const hidden = hiddenNodeIds(this.state);
-		const dataById = new Map(this.adapter.getData().nodes.map((node) => [node.id, node]));
-		const doc = this.view.containerEl.ownerDocument;
-		for (const node of this.adapter.nodes()) {
-			if (hidden.has(node.id) || !node.nodeEl || dataById.get(node.id)?.type === "group") continue;
-			const controls = doc.createElement("div");
-			controls.className = "canvas-mindmap-controls";
-			controls.setAttribute("role", "group");
-			controls.append(this.controlButton("Create child", "+", () => this.createChild(node.id)));
-			const childCount = relationChildren(this.state, node.id).length;
-			if (childCount > 0 && this.state.collapsedNodeIds.includes(node.id)) {
-				const count = hiddenDescendantCount(this.state, node.id);
-				controls.append(
-					this.controlButton(`Expand ${count} hidden card${count === 1 ? "" : "s"}`, `${count}`, () =>
-						this.toggleCollapse(node.id),
-					),
-				);
-			} else if (childCount > 0) {
-				controls.append(this.controlButton("Collapse descendants", "−", () => this.toggleCollapse(node.id)));
-			}
-			node.nodeEl.append(controls);
-		}
-	}
-
-	private controlButton(label: string, text: string, callback: () => void, icon?: string): HTMLButtonElement {
-		const button = this.view.containerEl.ownerDocument.createElement("button");
-		button.type = "button";
-		button.className = "canvas-mindmap-control clickable-icon";
-		if (icon) setIcon(button, icon);
-		else button.textContent = text;
-		button.setAttribute("aria-label", label);
-		setTooltip(button, label);
-		button.addEventListener("pointerdown", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-		});
-		button.addEventListener("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			callback();
-		});
-		return button;
 	}
 
 	private onKeyDown = (event: KeyboardEvent): void => {
@@ -1093,34 +1049,86 @@ export class CanvasController {
 		target: ColorPaletteTarget,
 		color: string | undefined,
 		label: string,
-	): boolean {
-		if (!this.state.enabled || (target.nodeIds.size === 0 && target.edgeIds.size === 0)) return false;
-		let changed = false;
-		const transaction = this.adapter.transaction(label, (next) =>
-			changed = applyCanvasColors(next, {
-				nodeIds: target.nodeIds,
-				edgeIds: target.edgeIds,
-				color,
-			}),
-			(_before, _requested, after) => {
-				const nodes = new Map(after.nodes.map((node) => [node.id, node]));
-				const edges = new Map(after.edges.map((edge) => [edge.id, edge]));
-				for (const nodeId of target.nodeIds) {
-					if (nodes.get(nodeId)?.color !== color) return false;
-				}
-				for (const edgeId of target.edgeIds) {
-					if (edges.get(edgeId)?.color !== color) return false;
-				}
-				return true;
-			},
-		);
-		if (!changed) return true;
-		if (!transaction) {
-			this.notify("Canvas did not accept that colour change. Check that this Canvas is writable and up to date.");
-			return false;
+	): ColorApplyResult {
+		if (!this.state.enabled) {
+			return {
+				status: "failed",
+				reason: "unsupported",
+				message: "Mind-map mode is not enabled for this Canvas.",
+			};
 		}
-		this.adapter.requestFrame();
-		return true;
+		if (this.adapter.capabilities.readOnly) {
+			return {
+				status: "failed",
+				reason: "read-only",
+				message: "This Canvas is read-only.",
+			};
+		}
+		if (!this.adapter.capabilities.available) {
+			return {
+				status: "failed",
+				reason: "unsupported",
+				message: "This Canvas version does not support colour changes.",
+			};
+		}
+		if (target.nodeIds.size === 0 && target.edgeIds.size === 0) {
+			return {
+				status: "failed",
+				reason: "target-missing",
+				message: "The selected Canvas target is no longer available.",
+			};
+		}
+
+		try {
+			const current = this.adapter.getData();
+			const nodeIds = new Set(current.nodes.map((node) => node.id));
+			const edgeIds = new Set(current.edges.map((edge) => edge.id));
+			if ([...target.nodeIds].some((nodeId) => !nodeIds.has(nodeId)) ||
+				[...target.edgeIds].some((edgeId) => !edgeIds.has(edgeId))) {
+				return {
+					status: "failed",
+					reason: "target-missing",
+					message: "The selected Canvas target is no longer available. Reopen the menu and try again.",
+				};
+			}
+
+			let changed = false;
+			const transaction = this.adapter.transaction(
+				label,
+				(next) => changed = applyCanvasColors(next, {
+					nodeIds: target.nodeIds,
+					edgeIds: target.edgeIds,
+					color,
+				}),
+				(_before, _requested, after) => {
+					const nodes = new Map(after.nodes.map((node) => [node.id, node]));
+					const edges = new Map(after.edges.map((edge) => [edge.id, edge]));
+					for (const nodeId of target.nodeIds) {
+						if (nodes.get(nodeId)?.color !== color) return false;
+					}
+					for (const edgeId of target.edgeIds) {
+						if (edges.get(edgeId)?.color !== color) return false;
+					}
+					return true;
+				},
+			);
+			if (!changed) return { status: "unchanged" };
+			if (!transaction) {
+				return {
+					status: "failed",
+					reason: "write-rejected",
+					message: "Canvas rejected the colour change. Reopen the menu and try again.",
+				};
+			}
+			this.adapter.requestFrame();
+			return { status: "applied" };
+		} catch {
+			return {
+				status: "failed",
+				reason: "runtime-error",
+				message: "The colour could not be applied. Reopen the menu and try again.",
+			};
+		}
 	}
 
 	private targetColor(target: ColorPaletteTarget): string | undefined {
@@ -1133,102 +1141,53 @@ export class CanvasController {
 		return colors.every((color) => color === first) ? first : undefined;
 	}
 
+	private scheduleColorPalette(nodeId: NodeId, target: ColorPaletteTarget): void {
+		// Obsidian closes its native Menu after the item callback returns. Open on
+		// the next task so the menu's pointer cleanup cannot consume or dismiss
+		// the first interaction with the floating palette.
+		this.win.setTimeout(() => {
+			if (!this.disposed && this.state.enabled) this.showColorPalette(nodeId, target);
+		}, 0);
+	}
+
 	private showColorPalette(nodeId: NodeId, target: ColorPaletteTarget, anchorElement?: HTMLElement): void {
 		this.closeColorPalette();
 		const doc = this.view.containerEl.ownerDocument;
 		const win = doc.defaultView ?? window;
-		const palette = doc.createElement("div");
-		palette.className = "canvas-mindmap-color-palette";
-		palette.setAttribute("role", "dialog");
-		palette.setAttribute("aria-label", target.label);
-
-		const heading = doc.createElement("div");
-		heading.className = "canvas-mindmap-color-palette-title";
-		heading.textContent = target.label;
-		palette.append(heading);
-
-		const swatches = doc.createElement("div");
-		swatches.className = "canvas-mindmap-color-swatches";
-		const currentColor = this.targetColor(target);
-		for (const pastel of PASTEL_COLORS) {
-			const button = doc.createElement("button");
-			button.type = "button";
-			button.className = "canvas-mindmap-color-swatch";
-			button.style.setProperty("--canvas-mindmap-swatch", pastel.hex);
-			button.setAttribute("aria-label", `${target.label}: ${pastel.label}`);
-			button.setAttribute("title", pastel.label);
-			button.setAttribute("aria-pressed", String(currentColor === pastel.hex));
-			if (currentColor === pastel.hex) button.classList.add("is-selected");
-			button.addEventListener("click", (event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				if (this.applyColorTarget(target, pastel.hex, `${target.label}: ${pastel.label}`)) {
-					this.closeColorPalette();
-				}
-			});
-			swatches.append(button);
+		let currentColor: string | undefined;
+		try {
+			currentColor = this.targetColor(target);
+		} catch {
+			currentColor = undefined;
 		}
-		palette.append(swatches);
-
-		const reset = doc.createElement("button");
-		reset.type = "button";
-		reset.className = "canvas-mindmap-color-reset";
-		reset.textContent = "Theme default";
-		reset.setAttribute("aria-label", `${target.label}: Theme default`);
-		reset.addEventListener("click", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			if (this.applyColorTarget(target, undefined, `${target.label}: Theme default`)) {
-				this.closeColorPalette();
-			}
+		const palette = openColorPalette({
+			document: doc,
+			window: win,
+			label: target.label,
+			colors: PASTEL_COLORS,
+			currentColor,
+			apply: (color) => this.applyColorTarget(target, color, `${target.label}: ${PASTEL_COLORS.find((pastel) => pastel.hex === color)?.label ?? "Colour"}`),
+			reset: () => this.applyColorTarget(target, undefined, `${target.label}: Theme default`),
 		});
-		palette.append(reset);
-
-		const host = doc.body ?? this.view.containerEl;
-		host.append(palette);
+		this.colorPalette = palette;
+		const paletteElement = palette.element;
 		const anchor = anchorElement ?? this.adapter.node(nodeId)?.nodeEl ?? this.view.containerEl;
 		const rect = anchor.getBoundingClientRect?.();
-		const width = palette.offsetWidth || 220;
-		const height = palette.offsetHeight || 118;
+		const width = paletteElement.offsetWidth || 220;
+		const height = paletteElement.offsetHeight || 150;
 		const viewportWidth = win.innerWidth || width + 16;
 		const viewportHeight = win.innerHeight || height + 16;
 		const preferredLeft = rect ? rect.right + 8 : 16;
 		const preferredTop = rect ? rect.bottom + 8 : 16;
 		const left = Math.max(8, Math.min(preferredLeft, viewportWidth - width - 8));
 		const top = Math.max(8, Math.min(preferredTop, viewportHeight - height - 8));
-		palette.style.left = `${left}px`;
-		palette.style.top = `${top}px`;
-
-		const onOutsidePointerDown = (event: PointerEvent): void => {
-			if (!palette.contains(event.target as Node)) this.closeColorPalette();
-		};
-		const onKeyDown = (event: KeyboardEvent): void => {
-			if (event.key !== "Escape") return;
-			event.preventDefault();
-			event.stopPropagation();
-			this.closeColorPalette();
-		};
-		palette.addEventListener("pointerdown", (event) => event.stopPropagation());
-		doc.addEventListener("pointerdown", onOutsidePointerDown, true);
-		win.addEventListener("keydown", onKeyDown, true);
-		this.colorPalette = palette;
-		this.colorPaletteCleanup = () => {
-			doc.removeEventListener("pointerdown", onOutsidePointerDown, true);
-			win.removeEventListener("keydown", onKeyDown, true);
-			palette.remove();
-			if (this.colorPalette === palette) {
-				this.colorPalette = undefined;
-				this.colorPaletteCleanup = undefined;
-			}
-		};
-		swatches.querySelector<HTMLButtonElement>("button")?.focus();
+		paletteElement.style.left = `${left}px`;
+		paletteElement.style.top = `${top}px`;
 	}
 
 	private closeColorPalette(): void {
-		this.colorPaletteCleanup?.();
-		this.colorPalette?.remove();
+		this.colorPalette?.close();
 		this.colorPalette = undefined;
-		this.colorPaletteCleanup = undefined;
 	}
 
 	applyBranchColor(color?: string, nodeId?: NodeId): boolean {
@@ -1246,7 +1205,7 @@ export class CanvasController {
 			{ label: "Branch colours", nodeIds, edgeIds },
 			color,
 			"Apply branch colours",
-		);
+		).status !== "failed";
 	}
 
 	duplicateSelectedBranch(nodeId?: NodeId): boolean {
@@ -1793,18 +1752,18 @@ export class CanvasController {
 		menu.addItem((item: any) => item.setTitle("Duplicate branch").setIcon("copy").onClick(() => this.duplicateSelectedBranch(nodeId)));
 		menu.addItem((item: any) => item.setTitle("Delete branch").setIcon("trash").onClick(() => this.deleteSelection([nodeId])));
 		menu.addItem((item: any) => item.setTitle("Layout this tree").setIcon("layout-dashboard").onClick(() => this.layoutTree(rootOf(this.state, nodeId))));
-		menu.addItem((item: any) => item.setTitle("Node colour").setIcon("palette").onClick(() => this.showColorPalette(
+		menu.addItem((item: any) => item.setTitle("Node colour").setIcon("palette").onClick(() => this.scheduleColorPalette(
 			nodeId,
 			{ label: "Node colour", nodeIds: new Set([nodeId]), edgeIds: new Set() },
 		)));
-		menu.addItem((item: any) => item.setTitle("Branch node colours").setIcon("palette").onClick(() => this.showColorPalette(
+		menu.addItem((item: any) => item.setTitle("Branch node colours").setIcon("palette").onClick(() => this.scheduleColorPalette(
 			nodeId,
 			{ label: "Branch node colours", nodeIds: branchTargets.nodeIds, edgeIds: new Set() },
 		)));
 		menu.addItem((item: any) => {
 			item.setTitle("Incoming arrow colour").setIcon("palette");
 			item.setDisabled?.(incomingEdgeIds.size === 0);
-			return item.onClick(() => this.showColorPalette(
+			return item.onClick(() => this.scheduleColorPalette(
 				nodeId,
 				{ label: "Incoming arrow colour", nodeIds: new Set(), edgeIds: incomingEdgeIds },
 			));
@@ -1812,7 +1771,7 @@ export class CanvasController {
 		menu.addItem((item: any) => {
 			item.setTitle("Branch arrow colours").setIcon("palette");
 			item.setDisabled?.(branchTargets.edgeIds.size === 0);
-			return item.onClick(() => this.showColorPalette(
+			return item.onClick(() => this.scheduleColorPalette(
 				nodeId,
 				{ label: "Branch arrow colours", nodeIds: new Set(), edgeIds: branchTargets.edgeIds },
 			));

@@ -15,6 +15,9 @@
     "../src/state-store.ts",
 	"../src/interaction.ts",
 	"../src/canvas-adapter.ts",
+	"../src/color-actions.ts",
+	"../src/colors.ts",
+	"../src/color-palette.ts",
     "*.test.ts"
   ]
 }
