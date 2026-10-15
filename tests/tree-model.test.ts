@@ -69,6 +69,20 @@ test("adopts only unambiguous acyclic directed connections", () => {
 	assert.equal(parentOf(adopted, "e"), undefined);
 });
 
+test("adoption repairs a stale relation from the current Canvas edge", () => {
+	const data = treeData();
+	const state = defaultCanvasState();
+	state.relations.b = { parentId: "a", edgeId: "missing-edge", order: 0 };
+
+	const repaired = adoptCanvasConnections(data, state).state;
+
+	assert.deepEqual(repaired.relations.b, {
+		parentId: "a",
+		edgeId: "e-ab",
+		order: 0,
+	});
+});
+
 test("traversal, collapse, root lookup, and sibling order are stable", () => {
 	const state = stateWithRelations();
 	assert.deepEqual(relationChildren(state, "a"), ["b", "c"]);

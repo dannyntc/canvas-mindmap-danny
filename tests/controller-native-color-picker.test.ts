@@ -516,7 +516,7 @@ test("creating a child makes room at its intended insertion point", async () => 
 	controller.dispose();
 });
 
-test("clicking Arrange mind map moves the selected tree and reports success", async () => {
+test("clicking Arrange mind map repairs missing relations and moves the selected branch", async () => {
 	const { Controller, window } = await loadController();
 	const wrapper = window.document.createElement("div");
 	wrapper.className = "canvas-wrapper";
@@ -533,16 +533,25 @@ test("clicking Arrange mind map moves the selected tree and reports success", as
 		nodes: [
 			{ id: "root", x: 100, y: 100, width: 120, height: 80, type: "text", text: "Root" },
 			{ id: "child", x: 700, y: 700, width: 100, height: 60, type: "text", text: "Child" },
+			{ id: "grandchild", x: 20, y: 20, width: 100, height: 60, type: "text", text: "Grandchild" },
+			{ id: "sibling", x: 300, y: 300, width: 100, height: 60, type: "text", text: "Sibling" },
 		],
-		edges: [{ id: "edge", fromNode: "root", fromSide: "right", toNode: "child", toSide: "left" }],
+		edges: [
+			{ id: "edge", fromNode: "root", fromSide: "right", toNode: "child", toSide: "left" },
+			{ id: "grand-edge", fromNode: "child", fromSide: "right", toNode: "grandchild", toSide: "left" },
+			{ id: "sibling-edge", fromNode: "root", fromSide: "right", toNode: "sibling", toSide: "left" },
+		],
 	};
 	const root = { ...data.nodes[0] };
 	const child = { ...data.nodes[1] };
+	const grandchild = { ...data.nodes[2] };
+	const sibling = { ...data.nodes[3] };
 	const selection = new Set<any>([child]);
 	const notices: string[] = [];
+	const stateChanges: any[] = [];
 	const canvas: any = {
 		wrapperEl: wrapper,
-		nodes: new Map([[root.id, root], [child.id, child]]),
+		nodes: new Map([[root.id, root], [child.id, child], [grandchild.id, grandchild], [sibling.id, sibling]]),
 		selection,
 		getData: () => data,
 		importData: (next: any) => { data = next; },
@@ -563,11 +572,11 @@ test("clicking Arrange mind map moves the selected tree and reports success", as
 			autoHeight: false,
 			defaultLayout: "left-to-right" as const,
 			trees: { root: { layout: "left-to-right", branchSides: {} } },
-			relations: { child: { parentId: "root", edgeId: "edge", order: 0 } },
+			relations: {},
 			collapsedNodeIds: [],
 			manualHeightNodeIds: [],
 		},
-		onStateChange: () => undefined,
+		onStateChange: (state: any) => stateChanges.push(state),
 		notify: (message: string) => notices.push(message),
 	});
 	controller.mount();
@@ -576,7 +585,19 @@ test("clicking Arrange mind map moves the selected tree and reports success", as
 	assert.ok(arrange);
 	arrange.click();
 
-	assert.equal(data.nodes.find((node: any) => node.id === "child").x, 420);
+	const arrangedChild = data.nodes.find((node: any) => node.id === "child");
+	assert.equal(arrangedChild.x, 700);
+	assert.equal(arrangedChild.y, 700);
+	assert.equal(data.nodes.find((node: any) => node.id === "grandchild").x, 1000);
+	assert.equal(data.nodes.find((node: any) => node.id === "sibling").x, 300);
+	const incomingEdge = data.edges.find((edge: any) => edge.id === "edge");
+	assert.equal(incomingEdge.fromSide, "right");
+	assert.equal(incomingEdge.toSide, "left");
+	assert.deepEqual(JSON.parse(JSON.stringify(stateChanges.at(-1).relations)), {
+		child: { parentId: "root", edgeId: "edge", order: 0 },
+		grandchild: { parentId: "child", edgeId: "grand-edge", order: 0 },
+		sibling: { parentId: "root", edgeId: "sibling-edge", order: 1 },
+	});
 	assert.deepEqual(notices, ["Mind map arranged."]);
 	controller.dispose();
 
@@ -590,7 +611,11 @@ test("clicking Arrange mind map moves the selected tree and reports success", as
 			autoHeight: false,
 			defaultLayout: "left-to-right" as const,
 			trees: { root: { layout: "left-to-right", branchSides: {} } },
-			relations: { child: { parentId: "root", edgeId: "edge", order: 0 } },
+			relations: {
+				child: { parentId: "root", edgeId: "edge", order: 0 },
+				grandchild: { parentId: "child", edgeId: "grand-edge", order: 0 },
+				sibling: { parentId: "root", edgeId: "sibling-edge", order: 1 },
+			},
 			collapsedNodeIds: [],
 			manualHeightNodeIds: [],
 		},
@@ -604,4 +629,73 @@ test("clicking Arrange mind map moves the selected tree and reports success", as
 	replacementArrange.click();
 	assert.deepEqual(replacementNotices, ["Mind map is already arranged."]);
 	replacement.dispose();
+});
+
+test("clicking Arrange mind map with no selected card arranges every tree", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	const controls = window.document.createElement("div");
+	controls.className = "canvas-controls";
+	wrapper.append(controls);
+	window.document.body.append(wrapper);
+
+	let data: any = {
+		nodes: [
+			{ id: "root", x: 100, y: 100, width: 120, height: 80, type: "text", text: "Root" },
+			{ id: "child", x: 700, y: 700, width: 100, height: 60, type: "text", text: "Child" },
+			{ id: "other-root", x: 900, y: 900, width: 120, height: 80, type: "text", text: "Other root" },
+			{ id: "other-child", x: 1200, y: 1200, width: 100, height: 60, type: "text", text: "Other child" },
+		],
+		edges: [
+			{ id: "edge", fromNode: "root", fromSide: "right", toNode: "child", toSide: "left" },
+			{ id: "other-edge", fromNode: "other-root", fromSide: "right", toNode: "other-child", toSide: "left" },
+		],
+	};
+	const nodes = data.nodes.map((node: any) => [node.id, { ...node }]);
+	const selection = new Set<any>();
+	const notices: string[] = [];
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: new Map(nodes),
+		selection,
+		getData: () => data,
+		importData: (next: any) => { data = next; },
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		deselectAll: () => selection.clear(),
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: false,
+			autoHeight: false,
+			defaultLayout: "left-to-right" as const,
+			trees: {
+				root: { layout: "left-to-right", branchSides: {} },
+				"other-root": { layout: "left-to-right", branchSides: {} },
+			},
+			relations: {},
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+		notify: (message: string) => notices.push(message),
+	});
+	controller.mount();
+
+	const arrange = wrapper.querySelector("[data-canvas-mindmap-action='arrange']") as HTMLButtonElement | null;
+	assert.ok(arrange);
+	arrange.click();
+
+	assert.equal(data.nodes.find((node: any) => node.id === "child").x, 420);
+	assert.equal(data.nodes.find((node: any) => node.id === "other-child").x, 1220);
+	assert.deepEqual(notices, ["Mind map arranged."]);
+	controller.dispose();
 });

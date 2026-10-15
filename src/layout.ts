@@ -12,6 +12,7 @@ import {
 import {
 	getNodeMap,
 	hiddenNodeIds,
+	parentOf,
 	relationChildren,
 	rootOf,
 	roots,
@@ -23,6 +24,7 @@ export interface LayoutOptions {
 	verticalGap?: number;
 	defaultLayout?: LayoutMode;
 	rootIds?: NodeId[];
+	subtreeRootIds?: NodeId[];
 }
 
 /**
@@ -45,6 +47,33 @@ export function layoutRootsForSelection(
 		rootsInSelection.push(rootId);
 	}
 	return rootsInSelection;
+}
+
+/**
+ * Resolve the card subtrees represented by a Canvas selection. Connector IDs
+ * and stale selection entries are ignored. When an ancestor and one of its
+ * descendants are both selected, only the ancestor is returned.
+ */
+export function layoutSubtreeRootsForSelection(
+	selectedIds: readonly NodeId[],
+	data: CanvasData,
+	state: CanvasMindMapState,
+): NodeId[] {
+	const nodeIds = new Set(data.nodes.map((node) => node.id));
+	const selectedCards = selectedIds.filter((selectedId, index) =>
+		nodeIds.has(selectedId) && selectedIds.indexOf(selectedId) === index,
+	);
+	const selectedSet = new Set(selectedCards);
+	return selectedCards.filter((selectedId) => {
+		let current = parentOf(state, selectedId);
+		const visited = new Set<NodeId>();
+		while (current && !visited.has(current)) {
+			if (selectedSet.has(current)) return false;
+			visited.add(current);
+			current = parentOf(state, current);
+		}
+		return true;
+	});
 }
 
 interface Size {
@@ -296,6 +325,26 @@ function edgeSidesFor(
 	return sides;
 }
 
+function balancedDirectionForSubtree(
+	state: CanvasMindMapState,
+	nodeId: NodeId,
+	rootId: NodeId,
+	root: CanvasNodeData,
+	node: CanvasNodeData,
+): 1 | -1 {
+	let branchId = nodeId;
+	let parentId = parentOf(state, branchId);
+	while (parentId && parentId !== rootId) {
+		branchId = parentId;
+		parentId = parentOf(state, branchId);
+	}
+	const explicit = state.trees[rootId]?.branchSides[branchId];
+	if (explicit) return explicit === "right" ? 1 : -1;
+	const rootCenter = root.x + root.width / 2;
+	const nodeCenter = node.x + node.width / 2;
+	return nodeCenter >= rootCenter ? 1 : -1;
+}
+
 export function assignMissingBalancedSides(
 	data: CanvasData,
 	state: CanvasMindMapState,
@@ -336,24 +385,44 @@ export function calculateLayout(
 		visible: new Set(),
 	};
 	const rootFilter = options.rootIds ? new Set(options.rootIds) : undefined;
-	for (const rootId of roots(data, state)) {
-		if (rootFilter && !rootFilter.has(rootId)) continue;
+	const subtreeFilter = options.subtreeRootIds ? new Set(options.subtreeRootIds) : undefined;
+	const layoutRoot = (rootId: NodeId, anchorId = rootId): void => {
+		const anchor = ctx.nodes.get(anchorId);
+		const treeRoot = ctx.nodes.get(rootId);
+		if (!anchor || !treeRoot) return;
 		const preference = state.trees[rootId];
 		const mode = preference?.layout ?? options.defaultLayout ?? state.defaultLayout;
+		if (anchorId !== rootId) {
+			if (mode === "top-to-bottom") {
+				placeVertical(ctx, anchorId, anchor.x + anchor.width / 2, anchor.y, 1);
+			} else if (mode === "bottom-to-top") {
+				placeVertical(ctx, anchorId, anchor.x + anchor.width / 2, anchor.y, -1);
+			} else {
+				const direction = mode === "balanced"
+					? balancedDirectionForSubtree(state, anchorId, rootId, treeRoot, anchor)
+					: mode === "right-to-left" ? -1 : 1;
+				placeHorizontal(ctx, anchorId, anchor.x, anchor.y + anchor.height / 2, direction);
+			}
+			return;
+		}
 		if (mode === "left-to-right") {
-			const root = ctx.nodes.get(rootId)!;
-			placeHorizontal(ctx, rootId, root.x, root.y + root.height / 2, 1);
+			placeHorizontal(ctx, rootId, treeRoot.x, treeRoot.y + treeRoot.height / 2, 1);
 		} else if (mode === "right-to-left") {
-			const root = ctx.nodes.get(rootId)!;
-			placeHorizontal(ctx, rootId, root.x, root.y + root.height / 2, -1);
+			placeHorizontal(ctx, rootId, treeRoot.x, treeRoot.y + treeRoot.height / 2, -1);
 		} else if (mode === "top-to-bottom") {
-			const root = ctx.nodes.get(rootId)!;
-			placeVertical(ctx, rootId, root.x + root.width / 2, root.y, 1);
+			placeVertical(ctx, rootId, treeRoot.x + treeRoot.width / 2, treeRoot.y, 1);
 		} else if (mode === "bottom-to-top") {
-			const root = ctx.nodes.get(rootId)!;
-			placeVertical(ctx, rootId, root.x + root.width / 2, root.y, -1);
+			placeVertical(ctx, rootId, treeRoot.x + treeRoot.width / 2, treeRoot.y, -1);
 		} else {
 			placeBalanced(ctx, rootId);
+		}
+	};
+	if (subtreeFilter) {
+		for (const anchorId of subtreeFilter) layoutRoot(rootOf(state, anchorId), anchorId);
+	} else {
+		for (const rootId of roots(data, state)) {
+			if (rootFilter && !rootFilter.has(rootId)) continue;
+			layoutRoot(rootId);
 		}
 	}
 	return {

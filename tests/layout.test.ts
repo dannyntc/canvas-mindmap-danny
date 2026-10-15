@@ -5,6 +5,7 @@ import {
 	calculateLayout,
 	chooseStraightConnectorSides,
 	layoutRootsForSelection,
+	layoutSubtreeRootsForSelection,
 } from "../src/layout";
 import { attachChild } from "../src/tree-model";
 import { CanvasData, defaultCanvasState } from "../src/types";
@@ -95,6 +96,48 @@ test("arrange selection resolves unique card roots and ignores connectors", () =
 		["root", "other"],
 	);
 	assert.deepEqual(layoutRootsForSelection([], canvas, map), []);
+});
+
+test("arrange selection resolves independent subtree anchors and drops descendants", () => {
+	const canvas = data();
+	canvas.nodes.push(node("other", 900, 900));
+	const map = state();
+
+	assert.deepEqual(
+		layoutSubtreeRootsForSelection(["grand", "wide", "e-grand", "other"], canvas, map),
+		["wide", "other"],
+	);
+});
+
+test("subtree layout keeps the selected card fixed and moves only its descendants", () => {
+	const canvas = data();
+	const map = state();
+	const result = calculateLayout(canvas, map, {
+		horizontalGap: 20,
+		verticalGap: 15,
+		subtreeRootIds: ["wide"],
+	});
+
+	assert.deepEqual(result.positions.wide, { x: 0, y: 0 });
+	assert.deepEqual(result.positions.grand, { x: 260, y: 15 });
+	assert.deepEqual(result.positions.root, { x: 100, y: 100 });
+	assert.deepEqual(result.positions.short, { x: 0, y: 0 });
+	assert.deepEqual(result.visibleNodeIds.sort(), ["grand", "wide"]);
+});
+
+test("balanced subtree layout preserves the selected branch side", () => {
+	const canvas = data();
+	const map = state();
+	map.trees.root.layout = "balanced";
+	map.trees.root.branchSides = { wide: "left", short: "right" };
+	const result = calculateLayout(canvas, map, {
+		horizontalGap: 20,
+		verticalGap: 15,
+		subtreeRootIds: ["wide"],
+	});
+
+	assert.deepEqual(result.positions.wide, { x: 0, y: 0 });
+	assert.equal(result.positions.grand.x, -150);
 });
 
 test("straight connector sides follow final card geometry", () => {

@@ -24,7 +24,7 @@ import {
 	assignMissingBalancedSides,
 	calculateLayout,
 	chooseStraightConnectorSides,
-	layoutRootsForSelection,
+	layoutSubtreeRootsForSelection,
 } from "./layout";
 import {
 	CanvasData,
@@ -53,6 +53,7 @@ import {
 	duplicateBranch,
 	ensureTreePreference,
 	hiddenNodeIds,
+	adoptCanvasConnections,
 	parentOf,
 	relationChildren,
 	replaceManagedEdge,
@@ -1164,17 +1165,19 @@ export class CanvasController {
 			return false;
 		}
 		const data = this.adapter.getData();
+		this.repairRelationsForArrange(data);
 		const selectedIds = this.adapter.selectionIds();
 		const selectedCardIds = selectedIds.filter((id) => data.nodes.some((node) => node.id === id));
-		const rootsInSelection = layoutRootsForSelection(selectedCardIds, data, this.state);
-		const connectedRoots = rootsInSelection.filter((rootId) => relationChildren(this.state, rootId).length > 0);
-		if (selectedCardIds.length > 0 && connectedRoots.length === 0) {
+		const subtreeRoots = layoutSubtreeRootsForSelection(selectedCardIds, data, this.state);
+		const connectedSubtrees = subtreeRoots.filter((nodeId) => relationChildren(this.state, nodeId).length > 0);
+		if (selectedCardIds.length > 0 && connectedSubtrees.length === 0) {
 			this.notify("This card has no connected branch to arrange.");
 			return false;
 		}
 		const arranged = this.applyLayout(
-			selectedCardIds.length > 0 ? connectedRoots : undefined,
+			selectedCardIds.length > 0 ? connectedSubtrees : undefined,
 			"Arrange mind map",
+			selectedCardIds.length > 0,
 		);
 		if (arranged) this.notify("Mind map arranged.");
 		else if (this.layoutOutcome === "failed") this.notify("Mind map could not be arranged because Canvas rejected the update.");
@@ -1204,13 +1207,24 @@ export class CanvasController {
 		return this.applyLayout([rootId]);
 	}
 
-	private applyLayout(rootIds?: NodeId[], label = "Layout mind-map tree"): boolean {
+	private repairRelationsForArrange(data: CanvasData): void {
+		const repaired = adoptCanvasConnections(data, this.state, this.state.defaultLayout).state;
+		if (JSON.stringify(repaired) === JSON.stringify(this.state)) return;
+		this.state = repaired;
+		this.commitState();
+	}
+
+	private applyLayout(
+		rootIds?: NodeId[],
+		label = "Layout mind-map tree",
+		subtree = false,
+	): boolean {
 		this.layoutOutcome = "unchanged";
 		const data = this.adapter.getData();
 		const result = calculateLayout(data, this.state, {
 			horizontalGap: this.options.horizontalGap ?? 200,
 			verticalGap: this.options.verticalGap ?? 50,
-			rootIds,
+			...(subtree ? { subtreeRootIds: rootIds } : { rootIds }),
 		});
 		const allowed = new Set(result.visibleNodeIds);
 		const childByEdge = new Map(
@@ -1226,7 +1240,8 @@ export class CanvasController {
 		}
 		for (const edge of data.edges) {
 			const sides = result.edgeSides[edge.id];
-			if (!childByEdge.has(edge.id) || !sides) continue;
+			if (!childByEdge.has(edge.id) || !sides ||
+				!allowed.has(edge.fromNode) || !allowed.has(edge.toNode)) continue;
 			if (edge.fromSide !== sides.fromSide || edge.toSide !== sides.toSide) changed = true;
 		}
 		if (!changed) return false;
@@ -1239,7 +1254,8 @@ export class CanvasController {
 				}
 			}
 			for (const edge of next.edges) {
-				if (childByEdge.has(edge.id) && result.edgeSides[edge.id]) {
+				if (childByEdge.has(edge.id) && result.edgeSides[edge.id] &&
+					allowed.has(edge.fromNode) && allowed.has(edge.toNode)) {
 					edge.fromSide = result.edgeSides[edge.id].fromSide;
 					edge.toSide = result.edgeSides[edge.id].toSide;
 				}
@@ -1253,6 +1269,7 @@ export class CanvasController {
 			for (const edge of after.edges) {
 				const sides = result.edgeSides[edge.id];
 				if (sides && childByEdge.has(edge.id) &&
+					allowed.has(edge.fromNode) && allowed.has(edge.toNode) &&
 					(edge.fromSide !== sides.fromSide || edge.toSide !== sides.toSide)) return false;
 			}
 			return true;
