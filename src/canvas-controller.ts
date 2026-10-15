@@ -149,7 +149,7 @@ function randomId(prefix: string, used: Set<string>): string {
 function isEditableTarget(target: EventTarget | null): boolean {
 	if (!target || typeof (target as Element).closest !== "function") return false;
 	return !!(target as Element).closest(
-		"input, textarea, select, button, [contenteditable='true'], .cm-editor, .markdown-source-view",
+		"input, textarea, select, button, [role='button'], [contenteditable='true'], .cm-editor, .markdown-source-view",
 	);
 }
 
@@ -178,7 +178,8 @@ export class CanvasController {
 	private pan?: PanSnapshot;
 	private panNoticeShown = false;
 	private readonly zoomControlStates = new WeakMap<HTMLElement, { ariaHidden: string | null; tabIndex: string | null }>();
-	private arrangeControl?: HTMLButtonElement;
+	private arrangeControl?: HTMLElement;
+	private arrangeControlGroup?: HTMLElement;
 	private readonly historyStates = new Map<string, CanvasMindMapState>();
 	private readonly height: HeightController;
 	private colorPalette?: ColorPaletteHandle;
@@ -502,7 +503,7 @@ export class CanvasController {
 			this.removeArrangeControl();
 			return;
 		}
-		const existing = controls.querySelector<HTMLButtonElement>(
+		const existing = controls.querySelector<HTMLElement>(
 			"[data-canvas-mindmap-action='arrange']",
 		);
 		if (existing && existing === this.arrangeControl) {
@@ -510,25 +511,40 @@ export class CanvasController {
 			this.positionArrangeControl(controls, existing);
 			return;
 		}
+		this.removeArrangeControl();
 		this.removeStaleArrangeControls();
-		const button = controls.ownerDocument.createElement("button");
-		button.type = "button";
-		button.className = "canvas-control-item canvas-mindmap-arrange-control clickable-icon";
-		button.dataset.canvasMindmapAction = "arrange";
-		button.setAttribute("aria-label", "Arrange mind map");
-		setTooltip(button, "Arrange mind map");
-		setIcon(button, "git-branch");
-		button.addEventListener("pointerdown", (event) => event.stopPropagation());
-		button.addEventListener("click", this.onArrangeClick);
-		this.positionArrangeControl(controls, button);
-		this.arrangeControl = button;
+		const control = controls.ownerDocument.createElement("div");
+		control.className = "canvas-control-item canvas-mindmap-arrange-control";
+		control.dataset.canvasMindmapAction = "arrange";
+		control.setAttribute("aria-label", "Arrange mind map");
+		control.setAttribute("role", "button");
+		control.setAttribute("tabindex", "0");
+		setTooltip(control, "Arrange mind map");
+		setIcon(control, "git-branch");
+		control.addEventListener("pointerdown", (event) => event.stopPropagation());
+		control.addEventListener("click", this.onArrangeClick);
+		control.addEventListener("keydown", this.onArrangeKeydown);
+		this.positionArrangeControl(controls, control);
+		this.arrangeControl = control;
 	}
 
 	private onArrangeClick = (event: MouseEvent): void => {
 		event.preventDefault();
 		event.stopPropagation();
-		if (this.disposed || !this.state.enabled || this.view.canvas !== this.adapter.canvas ||
-			event.currentTarget !== this.arrangeControl) return;
+		if (event.currentTarget !== this.arrangeControl) return;
+		this.runArrange();
+	};
+
+	private onArrangeKeydown = (event: KeyboardEvent): void => {
+		if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+		event.preventDefault();
+		event.stopPropagation();
+		if (event.currentTarget !== this.arrangeControl) return;
+		this.runArrange();
+	};
+
+	private runArrange(): void {
+		if (this.disposed || !this.state.enabled || this.view.canvas !== this.adapter.canvas) return;
 		try {
 			this.arrangeNeatly();
 		} catch (error) {
@@ -537,20 +553,35 @@ export class CanvasController {
 		}
 	};
 
-	private positionArrangeControl(controls: HTMLElement, button: HTMLButtonElement): void {
+	private positionArrangeControl(controls: HTMLElement, button: HTMLElement): void {
 		const historyAnchor = findCanvasHistoryAnchor(controls);
-		if (historyAnchor) {
+		const historyGroup = historyAnchor?.closest<HTMLElement>(".canvas-control-group");
+		if (historyAnchor && historyGroup) {
+			if (this.arrangeControlGroup && this.arrangeControlGroup !== historyGroup) {
+				this.arrangeControlGroup.remove();
+				this.arrangeControlGroup = undefined;
+			}
 			if (historyAnchor.nextElementSibling !== button) {
 				historyAnchor.insertAdjacentElement("afterend", button);
 			}
 			return;
 		}
-		if (controls.lastElementChild !== button) controls.append(button);
+		let arrangeGroup = this.arrangeControlGroup;
+		if (!arrangeGroup || !controls.contains(arrangeGroup)) {
+			arrangeGroup = controls.ownerDocument.createElement("div");
+			arrangeGroup.className = "canvas-control-group mod-raised";
+			arrangeGroup.dataset.canvasMindmapArrangeGroup = "true";
+			controls.append(arrangeGroup);
+			this.arrangeControlGroup = arrangeGroup;
+		}
+		if (arrangeGroup.firstElementChild !== button) arrangeGroup.append(button);
 	}
 
 	private removeArrangeControl(): void {
 		this.arrangeControl?.remove();
 		this.arrangeControl = undefined;
+		this.arrangeControlGroup?.remove();
+		this.arrangeControlGroup = undefined;
 	}
 
 	private removeStaleArrangeControls(): void {

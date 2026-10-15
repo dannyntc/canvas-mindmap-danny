@@ -26,6 +26,7 @@ This repository reconstructs the customised Canvas Mindmap plugin from the prese
 | `v1.1.16` | Increase real-time space-making clearance from 24px to 48px for dragging, branch movement, and node creation. |
 | `v1.1.17` | Ignore Shift+ArrowUp/Down so selected cards are not shifted by the shortcut. |
 | `v1.1.18` | Repair stale Canvas relations before Arrange and scope Arrange to the selected branch, with full-canvas fallback when nothing is selected. |
+| `v1.1.19` | Match the Arrange control to Obsidian’s native Canvas sidebar groups and styling. |
 
 ## Reconstruction method
 

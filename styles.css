@@ -36,24 +36,9 @@
     display: none !important;
 }
 
-.canvas-mindmap-arrange-control {
-    align-items: center;
-    background: transparent;
-    border: 0;
-    color: var(--text-muted);
-    cursor: pointer;
-    display: inline-flex;
-    height: var(--size-4-8);
-    justify-content: center;
-    min-width: var(--size-4-8);
-    padding: 0;
-    width: var(--size-4-8);
-}
-
-.canvas-mindmap-arrange-control:hover,
 .canvas-mindmap-arrange-control:focus-visible {
-    background-color: var(--background-modifier-hover);
-    color: var(--text-normal);
+    outline: 2px solid var(--interactive-accent);
+    outline-offset: -2px;
 }
 
 .canvas-mindmap-color-palette {

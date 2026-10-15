@@ -522,10 +522,16 @@ test("clicking Arrange mind map repairs missing relations and moves the selected
 	wrapper.className = "canvas-wrapper";
 	const controls = window.document.createElement("div");
 	controls.className = "canvas-controls";
+	const historyGroup = window.document.createElement("div");
+	historyGroup.className = "canvas-control-group mod-raised";
 	const history = window.document.createElement("div");
 	history.className = "canvas-control-item";
 	history.setAttribute("aria-label", "Undo");
-	controls.append(history);
+	const redo = window.document.createElement("div");
+	redo.className = "canvas-control-item";
+	redo.setAttribute("aria-label", "Redo");
+	historyGroup.append(history, redo);
+	controls.append(historyGroup);
 	wrapper.append(controls);
 	window.document.body.append(wrapper);
 
@@ -581,9 +587,16 @@ test("clicking Arrange mind map repairs missing relations and moves the selected
 	});
 	controller.mount();
 
-	const arrange = wrapper.querySelector("[data-canvas-mindmap-action='arrange']") as HTMLButtonElement | null;
+	const arrange = wrapper.querySelector("[data-canvas-mindmap-action='arrange']") as HTMLElement | null;
 	assert.ok(arrange);
+	assert.equal(arrange.tagName, "DIV");
+	assert.equal(arrange.classList.contains("clickable-icon"), false);
+	assert.equal(arrange.getAttribute("role"), "button");
+	assert.equal(arrange.getAttribute("tabindex"), "0");
+	assert.equal(arrange.parentElement, historyGroup);
+	assert.equal(arrange.previousElementSibling, redo);
 	arrange.click();
+	arrange.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
 	const arrangedChild = data.nodes.find((node: any) => node.id === "child");
 	assert.equal(arrangedChild.x, 700);
@@ -598,7 +611,7 @@ test("clicking Arrange mind map repairs missing relations and moves the selected
 		grandchild: { parentId: "child", edgeId: "grand-edge", order: 0 },
 		sibling: { parentId: "root", edgeId: "sibling-edge", order: 1 },
 	});
-	assert.deepEqual(notices, ["Mind map arranged."]);
+	assert.deepEqual(notices, ["Mind map arranged.", "Mind map is already arranged."]);
 	controller.dispose();
 
 	const replacementNotices: string[] = [];
@@ -623,7 +636,7 @@ test("clicking Arrange mind map repairs missing relations and moves the selected
 		notify: (message: string) => replacementNotices.push(message),
 	});
 	replacement.mount();
-	const replacementArrange = wrapper.querySelector("[data-canvas-mindmap-action='arrange']") as HTMLButtonElement | null;
+	const replacementArrange = wrapper.querySelector("[data-canvas-mindmap-action='arrange']") as HTMLElement | null;
 	assert.ok(replacementArrange);
 	assert.notEqual(replacementArrange, arrange);
 	replacementArrange.click();
@@ -690,8 +703,11 @@ test("clicking Arrange mind map with no selected card arranges every tree", asyn
 	});
 	controller.mount();
 
-	const arrange = wrapper.querySelector("[data-canvas-mindmap-action='arrange']") as HTMLButtonElement | null;
+	const arrange = wrapper.querySelector("[data-canvas-mindmap-action='arrange']") as HTMLElement | null;
 	assert.ok(arrange);
+	assert.equal(arrange.parentElement?.classList.contains("canvas-control-group"), true);
+	assert.equal(arrange.parentElement?.classList.contains("mod-raised"), true);
+	assert.equal(arrange.parentElement?.dataset.canvasMindmapArrangeGroup, "true");
 	arrange.click();
 
 	assert.equal(data.nodes.find((node: any) => node.id === "child").x, 420);
