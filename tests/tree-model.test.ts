@@ -15,6 +15,7 @@ import {
 	replaceManagedEdge,
 	relationChildren,
 	reorderSibling,
+	rerootTree,
 	rootOf,
 	roots,
 	sanitizeState,
@@ -118,6 +119,58 @@ test("reparenting replaces the managed connector without removing cross-links", 
 	);
 	assert.equal(data.edges.find((item) => item.id === "e-cd-new")?.fromNode, "c");
 	assert.equal(data.edges.some((item) => item.id === "e-bd"), false);
+});
+
+test("rerooting reverses only the ancestor path and preserves connector properties", () => {
+	const data = treeData();
+	data.edges[0].color = "#ff0000";
+	data.edges[0].label = "Parent branch";
+	data.edges.push({ ...edge("cross-bc", "b", "c"), color: "#00ff00" });
+	const state = stateWithRelations();
+	state.collapsedNodeIds = ["b"];
+	const positions = data.nodes.map((node) => ({ id: node.id, x: node.x, y: node.y }));
+	let sequence = 0;
+
+	const result = rerootTree(data, state, "d", () => `reversed-${++sequence}`);
+
+	assert.deepEqual(result && { oldRootId: result.oldRootId, newRootId: result.newRootId }, {
+		oldRootId: "a",
+		newRootId: "d",
+	});
+	assert.deepEqual(state.relations, {
+		b: { parentId: "d", edgeId: "reversed-1", order: 0 },
+		a: { parentId: "b", edgeId: "reversed-2", order: 0 },
+		c: { parentId: "a", edgeId: "e-ac", order: 0 },
+	});
+	assert.equal(state.trees.d?.layout, "left-to-right");
+	assert.deepEqual(state.collapsedNodeIds, ["b"]);
+	assert.deepEqual(data.nodes.map((node) => ({ id: node.id, x: node.x, y: node.y })), positions);
+	assert.deepEqual(data.edges.find((edge) => edge.id === "reversed-2"), {
+		id: "reversed-2",
+		fromNode: "b",
+		fromSide: "left",
+		toNode: "a",
+		toSide: "right",
+		color: "#ff0000",
+		label: "Parent branch",
+	});
+	assert.deepEqual(data.edges.find((edge) => edge.id === "cross-bc"), {
+		id: "cross-bc",
+		fromNode: "b",
+		fromSide: "right",
+		toNode: "c",
+		toSide: "left",
+		color: "#00ff00",
+	});
+});
+
+test("rerooting a current root is a safe no-op", () => {
+	const data = treeData();
+	const state = stateWithRelations();
+	const before = JSON.stringify({ data, state });
+
+	assert.equal(rerootTree(data, state, "a", () => "unexpected"), undefined);
+	assert.equal(JSON.stringify({ data, state }), before);
 });
 
 test("repeated reparenting leaves only the latest managed connector", () => {

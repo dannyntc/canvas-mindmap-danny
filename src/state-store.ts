@@ -1,11 +1,11 @@
 import {
 	CanvasData,
 	CanvasMindMapState,
+	DEFAULT_LAYOUT,
 	LayoutMode,
 	PersistedPluginData,
 	cloneJson,
 	defaultCanvasState,
-	isLayoutMode,
 } from "./types";
 import { adoptCanvasConnections, sanitizeState } from "./tree-model";
 
@@ -40,18 +40,9 @@ export function deepMergeDefaults<T>(defaults: T, value: unknown): T {
 	return (value === undefined ? cloneJson(defaults) : cloneJson(value)) as T;
 }
 
-function normalizeLayout(value: unknown, fallback: LayoutMode): LayoutMode {
-	if (isLayoutMode(value)) return value;
-	if (value === "LR") return "left-to-right";
-	if (value === "RL") return "right-to-left";
-	if (value === "TB") return "top-to-bottom";
-	if (value === "BT") return "bottom-to-top";
-	return fallback;
-}
-
 export function normalizeCanvasState(
 	value: unknown,
-	defaultLayout: LayoutMode = "balanced",
+	defaultLayout: LayoutMode = DEFAULT_LAYOUT,
 ): CanvasMindMapState {
 	const raw = isRecord(value) ? value : {};
 	const state = defaultCanvasState(defaultLayout);
@@ -61,7 +52,7 @@ export function normalizeCanvasState(
 	state.enabled = true;
 	state.autoLayout = raw.autoLayout !== false;
 	state.autoHeight = raw.autoHeight !== false;
-	state.defaultLayout = normalizeLayout(raw.defaultLayout, defaultLayout);
+	state.defaultLayout = DEFAULT_LAYOUT;
 	if (isRecord(raw.trees)) {
 		for (const [rootId, rawPreference] of Object.entries(raw.trees)) {
 			if (!isRecord(rawPreference)) continue;
@@ -72,7 +63,7 @@ export function normalizeCanvasState(
 				}
 			}
 			state.trees[rootId] = {
-				layout: normalizeLayout(rawPreference.layout, state.defaultLayout),
+				layout: DEFAULT_LAYOUT,
 				branchSides,
 			};
 		}
@@ -105,7 +96,7 @@ export function normalizeCanvasState(
 
 export function migratePluginData(
 	value: unknown,
-	defaultLayout: LayoutMode = "balanced",
+	defaultLayout: LayoutMode = DEFAULT_LAYOUT,
 ): PersistedPluginData {
 	const raw = isRecord(value) ? value : {};
 	const result = deepMergeDefaults(DEFAULT_PLUGIN_DATA, raw) as PersistedPluginData;
@@ -126,7 +117,7 @@ export class CanvasMindMapStore {
 		this.data = migratePluginData(raw);
 	}
 
-	get(path: string, defaultLayout: LayoutMode = "balanced"): CanvasMindMapState {
+	get(path: string, defaultLayout: LayoutMode = DEFAULT_LAYOUT): CanvasMindMapState {
 		const existing = this.data.mindMaps[path];
 		if (!existing) return defaultCanvasState(defaultLayout);
 		return cloneJson(normalizeCanvasState(existing, defaultLayout));
@@ -143,7 +134,7 @@ export class CanvasMindMapStore {
 	update(
 		path: string,
 		mutator: (state: CanvasMindMapState) => void,
-		defaultLayout: LayoutMode = "balanced",
+		defaultLayout: LayoutMode = DEFAULT_LAYOUT,
 	): CanvasMindMapState {
 		const state = this.get(path, defaultLayout);
 		mutator(state);
@@ -154,7 +145,7 @@ export class CanvasMindMapStore {
 	adopt(
 		path: string,
 		data: CanvasData,
-		defaultLayout: LayoutMode = "balanced",
+		defaultLayout: LayoutMode = DEFAULT_LAYOUT,
 	): CanvasMindMapState {
 		const current = this.get(path, defaultLayout);
 		const adopted = adoptCanvasConnections(data, current, defaultLayout).state;
@@ -165,7 +156,7 @@ export class CanvasMindMapStore {
 	cleanup(
 		path: string,
 		data: CanvasData,
-		defaultLayout: LayoutMode = "balanced",
+		defaultLayout: LayoutMode = DEFAULT_LAYOUT,
 	): CanvasMindMapState {
 		const state = sanitizeState(data, this.get(path, defaultLayout), defaultLayout);
 		this.set(path, state);

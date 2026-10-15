@@ -1,4 +1,4 @@
-# Canvas-Mindmap-Danny 1.1.16
+# Canvas-Mindmap-Danny 1.1.20
 
 Canvas-Mindmap-Danny is an Obsidian desktop plugin maintained by Danny and based on the original Canvas Mindmap work by Boninall. It keeps native Canvas cards, Markdown editing, colors, connectors, themes, and ordinary cross-links.
 
@@ -31,7 +31,8 @@ Existing directed connections are adopted only when they form an unambiguous acy
 - Arrow keys select the nearest visible card; Shift+ArrowUp/Down are intentionally ignored so they do not shift cards.
 - `Delete`/`Backspace` deletes the selected branch, including collapsed descendants.
 - The native Canvas zoom-in and zoom-out controls are hidden; mouse-wheel and trackpad zoom remain available.
-- The Canvas sidebar includes an `Arrange mind map` button. With cards selected it arranges their trees; with no card selected it arranges all trees.
+- The Canvas sidebar includes an `Arrange mind map` button. With cards selected it arranges only their descendants; with no card selected it arranges every tree. Arrange uses the original left-to-right direction and keeps each tree's central hub anchored.
+- The node menu identifies the root card as `Central hub`. Choose `Set as central hub` on another card to make it the new origin of that connected tree; the existing cards stay in place until Arrange is clicked.
 - Left-drag empty canvas space to pan around the map. Hold `Shift` while dragging empty space to retain native Canvas selection-box behavior.
 - Drag a single branch until its card touches another visible card, then hold briefly for the prospective parent to highlight before releasing to attach the branch. Hold `Cmd` on macOS or `Ctrl` on Windows to move without attaching.
 - When Auto layout is enabled, dragging or creating cards makes nearby cards and their branches move aside in real time, maintaining a 48px clearance. The space-making preview is recalculated from the original positions, so cards return when the path clears. Hold over a prospective parent for about half a second before releasing to attach; ordinary contact only makes space.

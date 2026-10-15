@@ -644,6 +644,83 @@ test("clicking Arrange mind map repairs missing relations and moves the selected
 	replacement.dispose();
 });
 
+test("setting a central hub reverses its ancestor path without moving cards", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	window.document.body.append(wrapper);
+	const nodes = [
+		{ id: "root", x: 0, y: 0, width: 120, height: 80, type: "text" },
+		{ id: "parent", x: 320, y: 0, width: 100, height: 60, type: "text" },
+		{ id: "target", x: 620, y: 0, width: 100, height: 60, type: "text" },
+		{ id: "sibling", x: 320, y: 160, width: 100, height: 60, type: "text" },
+	];
+	const originalPositions = nodes.map((node) => ({ id: node.id, x: node.x, y: node.y }));
+	let data: any = {
+		nodes,
+		edges: [
+			{ id: "root-parent", fromNode: "root", fromSide: "right", toNode: "parent", toSide: "left", color: "red", label: "Root to parent" },
+			{ id: "parent-target", fromNode: "parent", fromSide: "right", toNode: "target", toSide: "left", color: "blue", label: "Parent to target" },
+			{ id: "root-sibling", fromNode: "root", fromSide: "right", toNode: "sibling", toSide: "left" },
+		],
+	};
+	const notices: string[] = [];
+	const stateChanges: any[] = [];
+	const selection = new Set<any>();
+	const liveNodes = new Map(nodes.map((node) => [node.id, { ...node }]));
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: liveNodes,
+		selection,
+		getData: () => data,
+		importData: (next: any) => { data = next; },
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		deselectAll: () => selection.clear(),
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: false,
+			autoHeight: false,
+			defaultLayout: "left-to-right" as const,
+			trees: { root: { layout: "left-to-right", branchSides: {} } },
+			relations: {
+				parent: { parentId: "root", edgeId: "root-parent", order: 0 },
+				target: { parentId: "parent", edgeId: "parent-target", order: 0 },
+				sibling: { parentId: "root", edgeId: "root-sibling", order: 1 },
+			},
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: (next: any) => stateChanges.push(next),
+		notify: (message: string) => notices.push(message),
+	});
+	controller.mount();
+
+	assert.equal(controller.setCentralHub("target"), true);
+	const reversed = data.edges.filter((edge: any) => edge.fromNode === "target" || edge.fromNode === "parent");
+	assert.equal(reversed.length, 2);
+	assert.equal(reversed.some((edge: any) => edge.fromNode === "target" && edge.toNode === "parent" && edge.label === "Parent to target" && edge.color === "blue"), true);
+	assert.equal(reversed.some((edge: any) => edge.fromNode === "parent" && edge.toNode === "root" && edge.label === "Root to parent" && edge.color === "red"), true);
+	assert.equal(data.edges.some((edge: any) => edge.id === "root-sibling" && edge.fromNode === "root" && edge.toNode === "sibling"), true);
+	assert.equal(JSON.stringify(data.nodes.map((node: any) => ({ id: node.id, x: node.x, y: node.y }))), JSON.stringify(originalPositions));
+	const relations = JSON.parse(JSON.stringify(stateChanges.at(-1).relations));
+	assert.equal(relations.parent.parentId, "target");
+	assert.equal(relations.parent.edgeId, data.edges.find((edge: any) => edge.fromNode === "target")?.id);
+	assert.equal(relations.root.parentId, "parent");
+	assert.equal(relations.root.edgeId, data.edges.find((edge: any) => edge.fromNode === "parent")?.id);
+	assert.deepEqual(relations.sibling, { parentId: "root", edgeId: "root-sibling", order: 0 });
+	assert.deepEqual(notices, ["Central hub set. Click Arrange mind map to arrange from this card."]);
+	controller.dispose();
+});
+
 test("clicking Arrange mind map with no selected card arranges every tree", async () => {
 	const { Controller, window } = await loadController();
 	const wrapper = window.document.createElement("div");

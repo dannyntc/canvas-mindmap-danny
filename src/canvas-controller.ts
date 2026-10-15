@@ -58,6 +58,7 @@ import {
 	relationChildren,
 	replaceManagedEdge,
 	reorderSibling,
+	rerootTree,
 	rootOf,
 	roots,
 	sanitizeState,
@@ -1050,21 +1051,6 @@ export class CanvasController {
 		return stopped;
 	}
 
-	cycleSelectedLayout(): boolean {
-		const selected = this.adapter.selectionIds()[0];
-		if (!selected) return false;
-		const current = this.currentLayout(selected);
-		const modes: LayoutMode[] = [
-			"left-to-right",
-			"right-to-left",
-			"top-to-bottom",
-			"bottom-to-top",
-			"balanced",
-		];
-		const next = modes[(modes.indexOf(current) + 1) % modes.length];
-		return this.setTreeLayout(next, selected);
-	}
-
 	splitSelectedHeadings(): boolean {
 		const selected = this.adapter.selectionIds()[0];
 		if (!selected || !this.state.enabled) return false;
@@ -1214,18 +1200,6 @@ export class CanvasController {
 		else if (this.layoutOutcome === "failed") this.notify("Mind map could not be arranged because Canvas rejected the update.");
 		else this.notify("Mind map is already arranged.");
 		return arranged;
-	}
-
-	setTreeLayout(mode: LayoutMode, nodeId?: NodeId): boolean {
-		const selected = nodeId ?? this.adapter.selectionIds()[0];
-		if (!selected || !this.state.enabled) return false;
-		const root = rootOf(this.state, selected);
-		ensureTreePreference(this.state, root).layout = mode;
-		if (mode === "balanced") assignMissingBalancedSides(this.adapter.getData(), this.state, root, this.options.verticalGap ?? 50);
-		this.commitState();
-		if (this.state.autoLayout) this.layoutTree(root);
-		this.refreshControls();
-		return true;
 	}
 
 	private layoutSelectedOrChanged(): void {
@@ -1538,6 +1512,60 @@ export class CanvasController {
 		if (!target || !reorderSibling(this.state, target, direction)) return false;
 		this.commitState();
 		if (this.state.autoLayout) this.layoutTree(rootOf(this.state, target));
+		return true;
+	}
+
+	setCentralHub(nodeId?: NodeId): boolean {
+		if (!this.state.enabled || this.adapter.capabilities.readOnly) return false;
+		const targetId = nodeId ?? this.adapter.selectionIds()[0];
+		if (!targetId) return false;
+		const data = this.adapter.getData();
+		const target = data.nodes.find((node) => node.id === targetId);
+		if (!target || target.type === "group") return false;
+		this.repairRelationsForArrange(data);
+		if (!parentOf(this.state, targetId)) {
+			this.notify("This card is already the central hub.");
+			return false;
+		}
+
+		const beforeState = cloneJson(this.state);
+		const candidateData = cloneJson(data);
+		const nextState = cloneJson(this.state);
+		const edgeIds = new Set(candidateData.edges.map((edge) => edge.id));
+		const result = rerootTree(
+			candidateData,
+			nextState,
+			targetId,
+			(_previousEdgeId) => randomId("canvas-mindmap-edge", edgeIds),
+		);
+		if (!result) {
+			this.notify("The central hub could not be changed because the branch connections are invalid.");
+			return false;
+		}
+
+		const transaction = this.adapter.transaction(
+			"Set central hub",
+			(next) => {
+				next.edges = candidateData.edges;
+			},
+			(_before, requested, after) => JSON.stringify(after.edges) === JSON.stringify(requested.edges),
+		);
+		if (!transaction) {
+			this.notify("Canvas rejected the central hub change.");
+			return false;
+		}
+		this.state = nextState;
+		this.rememberHistoryStates(
+			transaction.beforeData,
+			beforeState,
+			transaction.afterData,
+			nextState,
+		);
+		this.commitState();
+		this.adapter.requestFrame();
+		this.applyVisibility();
+		this.refreshControls();
+		this.notify("Central hub set. Click Arrange mind map to arrange from this card.");
 		return true;
 	}
 
@@ -2138,6 +2166,13 @@ export class CanvasController {
 		}
 		const menu = new Menu();
 		menu.addItem((item: any) => item.setTitle("Create child").setIcon("plus").onClick(() => this.createChild(nodeId)));
+		const isHub = !parentOf(this.state, nodeId);
+		menu.addItem((item: any) => {
+			item.setTitle(isHub ? "Central hub" : "Set as central hub").setIcon("target");
+			item.setChecked?.(isHub);
+			item.setDisabled?.(isHub);
+			return item.onClick(() => this.setCentralHub(nodeId));
+		});
 		if (parentOf(this.state, nodeId)) {
 			menu.addItem((item: any) => item.setTitle("Create next sibling").setIcon("plus").onClick(() => this.createSibling(nodeId, "after")));
 			menu.addItem((item: any) => item.setTitle("Create previous sibling").setIcon("plus").onClick(() => this.createSibling(nodeId, "before")));
@@ -2147,15 +2182,6 @@ export class CanvasController {
 		menu.addItem((item: any) => item.setTitle("Select branch").setIcon("select").onClick(() => this.selectBranch(nodeId)));
 		if (relationChildren(this.state, nodeId).length > 0) {
 			menu.addItem((item: any) => item.setTitle(this.state.collapsedNodeIds.includes(nodeId) ? "Expand branch" : "Collapse branch").setIcon("chevrons-down-up").onClick(() => this.toggleCollapse(nodeId)));
-		}
-		for (const [mode, label] of [
-			["left-to-right", "Left to right"],
-			["right-to-left", "Right to left"],
-			["top-to-bottom", "Top to bottom"],
-			["bottom-to-top", "Bottom to top"],
-			["balanced", "Balanced left/right"],
-		] as const) {
-			menu.addItem((item: any) => item.setTitle(`Layout: ${label}`).setIcon("layout-dashboard").onClick(() => this.setTreeLayout(mode, nodeId)));
 		}
 		menu.addItem((item: any) => item.setTitle("Duplicate branch").setIcon("copy").onClick(() => this.duplicateSelectedBranch(nodeId)));
 		menu.addItem((item: any) => item.setTitle("Delete branch").setIcon("trash").onClick(() => this.deleteSelection([nodeId])));

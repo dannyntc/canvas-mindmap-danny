@@ -27,6 +27,7 @@ This repository reconstructs the customised Canvas Mindmap plugin from the prese
 | `v1.1.17` | Ignore Shift+ArrowUp/Down so selected cards are not shifted by the shortcut. |
 | `v1.1.18` | Repair stale Canvas relations before Arrange and scope Arrange to the selected branch, with full-canvas fallback when nothing is selected. |
 | `v1.1.19` | Match the Arrange control to Obsidian’s native Canvas sidebar groups and styling. |
+| `v1.1.20` | Restore the original left-to-right Arrange default and add selectable central hubs with ancestor-path rerooting. |
 
 ## Reconstruction method
 

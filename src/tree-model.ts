@@ -4,6 +4,7 @@ import {
 	CanvasNodeData,
 	CanvasMindMapState,
 	CURRENT_STATE_VERSION,
+	DEFAULT_LAYOUT,
 	LayoutMode,
 	NodeId,
 	ParentRelation,
@@ -29,6 +30,12 @@ export interface DuplicateBranchResult {
 	edges: CanvasEdgeData[];
 	rootId: NodeId;
 	oldToNew: Map<NodeId, NodeId>;
+}
+
+export interface RerootResult {
+	oldRootId: NodeId;
+	newRootId: NodeId;
+	reversedEdgeIds: Set<string>;
 }
 
 function nodeMap(data: CanvasData): Map<NodeId, CanvasNodeData> {
@@ -142,6 +149,102 @@ export function replaceManagedEdge(
 		edge.id !== previousEdgeId && edge.id !== replacement.id,
 	);
 	data.edges.push(replacement);
+}
+
+/**
+ * Promote a card to the root of its managed tree by reversing its ancestor
+ * path. Card positions are left untouched so the caller can arrange the new
+ * tree explicitly afterwards.
+ */
+export function rerootTree(
+	data: CanvasData,
+	state: CanvasMindMapState,
+	newRootId: NodeId,
+	makeEdgeId: (previousEdgeId: string) => string,
+): RerootResult | undefined {
+	const nodes = nodeMap(data);
+	const target = nodes.get(newRootId);
+	if (!isTreeNode(target)) return undefined;
+
+	const path: Array<{
+		childId: NodeId;
+		parentId: NodeId;
+		edge: CanvasEdgeData;
+	}> = [];
+	const visited = new Set<NodeId>();
+	let childId = newRootId;
+	while (state.relations[childId]) {
+		if (visited.has(childId)) return undefined;
+		visited.add(childId);
+		const relation = state.relations[childId];
+		const parent = nodes.get(relation.parentId);
+		const edge = data.edges.find((candidate) => candidate.id === relation.edgeId);
+		if (!isTreeNode(parent) || !edge ||
+			edge.fromNode !== relation.parentId || edge.toNode !== childId) {
+			return undefined;
+		}
+		path.push({ childId, parentId: relation.parentId, edge });
+		childId = relation.parentId;
+	}
+	if (path.length === 0) return undefined;
+
+	const oldRootId = childId;
+	const usedEdgeIds = new Set(data.edges.map((edge) => edge.id));
+	const replacements = path.map(({ childId: oldChildId, parentId, edge }) => {
+		const id = makeEdgeId(edge.id);
+		if (!id || usedEdgeIds.has(id)) return undefined;
+		usedEdgeIds.add(id);
+		return {
+			oldId: edge.id,
+			edge: {
+				...cloneJson(edge),
+				id,
+				fromNode: oldChildId,
+				fromSide: edge.toSide,
+				toNode: parentId,
+				toSide: edge.fromSide,
+			},
+		};
+	});
+	if (replacements.some((replacement) => !replacement)) return undefined;
+
+	const nextState = cloneJson(state);
+	for (const { childId: pathChildId } of path) delete nextState.relations[pathChildId];
+	for (let index = 0; index < path.length; index += 1) {
+		const newParentId = path[index].childId;
+		const newChildId = path[index].parentId;
+		const children = relationChildren(nextState, newParentId);
+		const order = children.reduce(
+			(max, siblingId) => Math.max(max, nextState.relations[siblingId]?.order ?? -1),
+			-1,
+		) + 1;
+		nextState.relations[newChildId] = {
+			parentId: newParentId,
+			edgeId: replacements[index]!.edge.id,
+			order,
+		};
+	}
+
+	const edgeReplacements = new Map(
+		replacements.map((replacement) => [replacement!.oldId, replacement!.edge]),
+	);
+	data.edges = data.edges.map((edge) => edgeReplacements.get(edge.id) ?? edge);
+	const clean = sanitizeState(data, nextState, DEFAULT_LAYOUT);
+	clean.trees[newRootId] = { layout: DEFAULT_LAYOUT, branchSides: {} };
+	state.version = clean.version;
+	state.enabled = clean.enabled;
+	state.autoLayout = clean.autoLayout;
+	state.autoHeight = clean.autoHeight;
+	state.defaultLayout = clean.defaultLayout;
+	state.trees = clean.trees;
+	state.relations = clean.relations;
+	state.collapsedNodeIds = clean.collapsedNodeIds;
+	state.manualHeightNodeIds = clean.manualHeightNodeIds;
+	return {
+		oldRootId,
+		newRootId,
+		reversedEdgeIds: new Set(replacements.map((replacement) => replacement!.edge.id)),
+	};
 }
 
 export function crossLinkEdges(
@@ -313,11 +416,11 @@ function relationIsValid(
 export function sanitizeState(
 	data: CanvasData,
 	input: CanvasMindMapState,
-	defaultLayout: LayoutMode = "balanced",
+	defaultLayout: LayoutMode = DEFAULT_LAYOUT,
 ): CanvasMindMapState {
 	const state = cloneJson(input);
 	state.version = CURRENT_STATE_VERSION;
-	state.defaultLayout = state.defaultLayout ?? defaultLayout;
+	state.defaultLayout = DEFAULT_LAYOUT;
 	state.trees ??= {};
 	state.relations ??= {};
 	state.collapsedNodeIds ??= [];
@@ -346,7 +449,7 @@ export function sanitizeState(
 	for (const rootId of validRoots) {
 		const previous = state.trees[rootId];
 		trees[rootId] = {
-			layout: previous?.layout ?? state.defaultLayout ?? defaultLayout,
+			layout: DEFAULT_LAYOUT,
 			branchSides: { ...(previous?.branchSides ?? {}) },
 		};
 	}
@@ -364,7 +467,7 @@ export function sanitizeState(
 export function adoptCanvasConnections(
 	data: CanvasData,
 	input: CanvasMindMapState = defaultCanvasState(),
-	defaultLayout: LayoutMode = "balanced",
+	defaultLayout: LayoutMode = DEFAULT_LAYOUT,
 ): AdoptionResult {
 	const state = sanitizeState(data, input, defaultLayout);
 	const nodes = nodeMap(data);
@@ -391,7 +494,7 @@ export function adoptCanvasConnections(
 export function ensureTreePreference(
 	state: CanvasMindMapState,
 	rootId: NodeId,
-	layout: LayoutMode = state.defaultLayout,
+	layout: LayoutMode = DEFAULT_LAYOUT,
 ): TreePreferences {
 	return (state.trees[rootId] ??= { layout, branchSides: {} });
 }

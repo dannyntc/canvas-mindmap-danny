@@ -8,6 +8,8 @@ export type LayoutMode =
 	| "bottom-to-top"
 	| "balanced";
 
+export const DEFAULT_LAYOUT: LayoutMode = "left-to-right";
+
 export type BranchSide = "left" | "right";
 export type CanvasNodeType = "text" | "file" | "link" | "group" | string;
 export type CanvasSide = "top" | "bottom" | "left" | "right";
@@ -101,7 +103,7 @@ export interface LayoutResult {
 export const CURRENT_STATE_VERSION = 1;
 
 export function defaultCanvasState(
-	defaultLayout: LayoutMode = "balanced",
+	defaultLayout: LayoutMode = DEFAULT_LAYOUT,
 ): CanvasMindMapState {
 	return {
 		version: CURRENT_STATE_VERSION,

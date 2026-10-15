@@ -16,6 +16,30 @@ test("migration preserves legacy settings and enables mind-map behavior by defau
 	assert.equal(store.get("Maps/demo.canvas").enabled, true);
 });
 
+test("saved layout choices normalize to the original left-to-right default", () => {
+	const migrated = migratePluginData({
+		mindMaps: {
+			"Maps/demo.canvas": {
+				version: 1,
+				enabled: true,
+				autoLayout: true,
+				autoHeight: true,
+				defaultLayout: "balanced",
+				trees: {
+					root: { layout: "bottom-to-top", branchSides: { child: "left" } },
+				},
+				relations: {},
+				collapsedNodeIds: [],
+				manualHeightNodeIds: [],
+			},
+		},
+	});
+	const state = migrated.mindMaps["Maps/demo.canvas"];
+	assert.equal(state.defaultLayout, "left-to-right");
+	assert.equal(state.trees.root.layout, "left-to-right");
+	assert.deepEqual(state.trees.root.branchSides, { child: "left" });
+});
+
 test("canvas records survive rename and stale metadata cleanup", () => {
 	const store = new CanvasMindMapStore();
 	const state = defaultCanvasState();

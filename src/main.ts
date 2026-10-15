@@ -9,7 +9,7 @@ import {
 import { CanvasController, CanvasViewLike } from "./canvas-controller";
 import { CanvasAdapter } from "./canvas-adapter";
 import { CanvasMindMapStore, deepMergeDefaults } from "./state-store";
-import { CanvasMindMapState, LayoutMode } from "./types";
+import { CanvasMindMapState, DEFAULT_LAYOUT } from "./types";
 
 interface LegacySettings {
 	navigate: { useNavigate: boolean; modifierKey: string[] };
@@ -70,16 +70,6 @@ const DEFAULT_LEGACY_SETTINGS: LegacySettings = {
 	lastUpdatedVersion: "1.1.17",
 	},
 };
-
-function legacyLayout(value: unknown): LayoutMode {
-	switch (value) {
-		case "RL": return "right-to-left";
-		case "TB": return "top-to-bottom";
-		case "BT": return "bottom-to-top";
-		case "balanced": return "balanced";
-		default: return "left-to-right";
-	}
-}
 
 function isCanvasView(view: any): view is CanvasViewLike {
 	return !!view && (view.getViewType?.() === "canvas" || !!view.canvas);
@@ -173,14 +163,14 @@ export default class CanvasMindMapPlugin extends Plugin {
 		}
 		const hadState = this.store.has(path);
 		let state = hadState
-			? this.store.cleanup(path, adapter.getData(), legacyLayout(this.settings.layout.autoLayoutDirection))
-			: this.store.adopt(path, adapter.getData(), legacyLayout(this.settings.layout.autoLayoutDirection));
+			? this.store.cleanup(path, adapter.getData(), DEFAULT_LAYOUT)
+			: this.store.adopt(path, adapter.getData(), DEFAULT_LAYOUT);
 		if (!hadState) {
 			state = {
 				...state,
 				autoLayout: this.settings.layout.autoLayout,
 				autoHeight: this.settings.layout.autoHeight,
-				defaultLayout: "balanced",
+				defaultLayout: DEFAULT_LAYOUT,
 			};
 			this.store.set(path, state);
 		}
@@ -276,7 +266,6 @@ export default class CanvasMindMapPlugin extends Plugin {
 		this.command("create-floating-node", "Create floating node", (controller) => controller.createFloatingNode());
 		this.command("enter-edit-mode", "Enter card edit mode", (controller) => controller.startEditingSelected());
 		this.command("exit-edit-mode", "Exit card edit mode", (controller) => controller.stopEditingSelected());
-		this.command("change-direction", "Cycle mind-map layout direction", (controller) => controller.cycleSelectedLayout());
 		this.command("split-heading-into-mindmap", "Split headings into mind-map cards", (controller) => controller.splitSelectedHeadings());
 		this.command("select-branch", "Select mind-map branch", (controller) => controller.selectBranch());
 		this.command("collapse-branch", "Collapse or expand mind-map branch", (controller) => {
@@ -321,20 +310,6 @@ class CanvasMindMapSettingTab extends PluginSettingTab {
 		const heading = document.createElement("h2");
 		heading.textContent = "Canvas Mindmap";
 		if (!heading.parentElement) container.appendChild(heading);
-		new Setting(container)
-			.setName("Default layout")
-			.setDesc("Used for newly adopted or newly created trees; existing trees keep their layout.")
-			.addDropdown((dropdown: any) => dropdown
-				.addOption("left-to-right", "Left to right")
-				.addOption("right-to-left", "Right to left")
-				.addOption("top-to-bottom", "Top to bottom")
-				.addOption("bottom-to-top", "Bottom to top")
-				.addOption("balanced", "Balanced left/right")
-				.setValue(legacyLayout(this.pluginRef.settings.layout.autoLayoutDirection))
-				.onChange(async (value: LayoutMode) => {
-					this.pluginRef.settings.layout.autoLayoutDirection = value;
-					await this.pluginRef.saveSettings();
-				}));
 		new Setting(container)
 			.setName("Automatic layout for new canvases")
 			.setDesc("Canvas Mindmap behavior is enabled automatically whenever the plugin is active.")
