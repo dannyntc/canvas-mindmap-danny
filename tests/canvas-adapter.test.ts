@@ -26,6 +26,19 @@ test("viewport adapter reads and writes Canvas x/y/zoom without changing card da
 	assert.deepEqual(adapter.viewport(), { x: 80, y: 60, zoom: 2 });
 });
 
+test("node type resolves from the native getData method", () => {
+	const liveNode: CanvasNodeLike = {
+		id: "node",
+		x: 0,
+		y: 0,
+		width: 100,
+		height: 60,
+		getData: () => ({ id: "node", x: 0, y: 0, width: 100, height: 60, type: "text" }),
+	};
+	const adapter = new CanvasAdapter(canvas({ nodes: new Map([[liveNode.id, liveNode]]) }));
+	assert.equal(adapter.isTextNode(liveNode), true);
+});
+
 test("viewport adapter supports a native three-argument setter", () => {
 	let latest = { x: 0, y: 0, zoom: 1 };
 	let receiverSeen = false;

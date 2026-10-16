@@ -14,7 +14,7 @@ export interface CanvasNodeLike {
 	y: number;
 	width: number;
 	height: number;
-	type: string;
+	type?: string;
 	nodeEl?: HTMLElement;
 	isEditing?: boolean;
 	startEditing?: () => void;
@@ -22,9 +22,24 @@ export interface CanvasNodeLike {
 	setIsEditing?: (editing: boolean) => void;
 	moveTo?: (position: Point) => void;
 	resize?: (size: { width: number; height: number }) => void;
+	getData?: () => CanvasNodeData;
+	onResizeDblclick?: (event: MouseEvent, side: ResizeSide) => unknown;
 	setColor?: (color: string) => void;
 	[key: string]: unknown;
 }
+
+export type ResizeSide = "top" | "right" | "bottom" | "left";
+
+export interface NativeResizeDblclickHook {
+	refresh: () => void;
+	dispose: () => void;
+}
+
+export type NativeResizeDblclickHandler = (
+	node: CanvasNodeLike,
+	event: MouseEvent,
+	side: ResizeSide,
+) => void;
 
 export interface NativeSelectionDragCallbacks {
 	move?: (event: PointerEvent) => unknown;
@@ -168,6 +183,23 @@ export class CanvasAdapter {
 
 	nodes(): CanvasNodeLike[] {
 		return [...asNodeMap(this.canvas.nodes).values()];
+	}
+
+	nodeType(node: CanvasNodeLike): string | undefined {
+		if (isFunction(node.getData)) {
+			try {
+				const data = node.getData.call(node);
+				if (typeof data?.type === "string") return data.type;
+			} catch {
+				// Fall through to the direct property and Canvas snapshot.
+			}
+		}
+		if (typeof node.type === "string") return node.type;
+		return this.getData().nodes.find((candidate) => candidate.id === node.id)?.type;
+	}
+
+	isTextNode(node: CanvasNodeLike): boolean {
+		return this.nodeType(node) === "text";
 	}
 
 	selectionIds(): string[] {
@@ -326,6 +358,52 @@ export class CanvasAdapter {
 		};
 	}
 
+	observeResizeDblclick(onResize: NativeResizeDblclickHandler): NativeResizeDblclickHook {
+		const originals = new Map<CanvasNodeLike, (event: MouseEvent, side: ResizeSide) => unknown>();
+		const wrappers = new Map<CanvasNodeLike, (event: MouseEvent, side: ResizeSide) => unknown>();
+		const refresh = (): void => {
+			for (const node of this.nodes()) {
+				const current = node.onResizeDblclick;
+				const wrapper = wrappers.get(node);
+				if (wrapper && current === wrapper) continue;
+				if (wrapper) {
+					originals.delete(node);
+					wrappers.delete(node);
+				}
+				if (!isFunction(current)) continue;
+				const original = current as (event: MouseEvent, side: ResizeSide) => unknown;
+				const wrapped = function (this: CanvasNodeLike, event: MouseEvent, side: ResizeSide): unknown {
+					const result = original.call(this, event, side);
+					onResize(this, event, side);
+					return result;
+				};
+				try {
+					node.onResizeDblclick = wrapped;
+					originals.set(node, original);
+					wrappers.set(node, wrapped);
+				} catch {
+					// Some Obsidian releases expose the method as read-only.
+				}
+			}
+		};
+		refresh();
+		return {
+			refresh,
+			dispose: () => {
+				for (const [node, wrapper] of wrappers) {
+					if (node.onResizeDblclick !== wrapper) continue;
+					try {
+						node.onResizeDblclick = originals.get(node);
+					} catch {
+						// Another runtime owns this private method now.
+					}
+				}
+				originals.clear();
+				wrappers.clear();
+			},
+		};
+	}
+
 	viewport(): CanvasViewport | undefined {
 		if (isFunction(this.canvas.getViewport)) {
 			try {
@@ -469,7 +547,7 @@ export class CanvasAdapter {
 			y: node.y,
 			width: node.width,
 			height: node.height,
-			type: node.type,
+			type: node.type ?? "text",
 		};
 	}
 }

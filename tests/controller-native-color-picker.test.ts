@@ -792,3 +792,166 @@ test("clicking Arrange mind map with no selected card arranges every tree", asyn
 	assert.deepEqual(notices, ["Mind map arranged."]);
 	controller.dispose();
 });
+
+test("native resize fitting adds stable axis-specific clearance", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	window.document.body.append(wrapper);
+	const nodeElement = window.document.createElement("div");
+	nodeElement.className = "canvas-node";
+	Object.defineProperty(nodeElement, "scrollHeight", { configurable: true, value: 120 });
+	Object.defineProperty(nodeElement, "offsetHeight", { configurable: true, value: 120 });
+	Object.defineProperty(nodeElement, "getBoundingClientRect", {
+		configurable: true,
+		value: () => ({ left: 0, top: 0, right: 100, bottom: 60, width: 100, height: 60 }),
+	});
+	wrapper.append(nodeElement);
+
+	let data: any = {
+		nodes: [{ id: "node", x: 0, y: 0, width: 100, height: 60, type: "text", text: "Node" }],
+		edges: [],
+	};
+	const node: any = { ...data.nodes[0], nodeEl: nodeElement };
+	delete node.type;
+	node.getData = () => ({ ...data.nodes[0], type: "text" });
+	node.onResizeDblclick = (_event: MouseEvent, side: string) => {
+		if (side === "right" && node.width !== 148) node.width = 100;
+		if (side === "bottom") node.height = 40;
+	};
+	node.child = { previewMode: { renderer: { previewEl: { isShown: () => true } } } };
+	const originalResizeDblclick = node.onResizeDblclick;
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: new Map([[node.id, node]]),
+		selection: new Set([node]),
+		getData: () => data,
+		importData: (next: any) => {
+			data = next;
+			node.width = next.nodes[0].width;
+			node.height = next.nodes[0].height;
+		},
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: false,
+			autoHeight: false,
+			defaultLayout: "left-to-right" as const,
+			trees: {},
+			relations: {},
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+	});
+	controller.mount();
+
+	// The real resize overlay is outside the card. The native interaction layer
+	// calls the card method directly, so the test invokes that same contract.
+	node.onResizeDblclick(new window.MouseEvent("dblclick"), "right");
+	assert.equal(node.width, 148);
+	assert.equal(node.height, 60);
+
+	node.onResizeDblclick(new window.MouseEvent("dblclick"), "right");
+	assert.equal(node.width, 148);
+
+	node.onResizeDblclick(new window.MouseEvent("dblclick"), "bottom");
+	assert.equal(node.width, 148);
+	assert.equal(node.height, 72);
+
+	controller.dispose();
+	assert.equal(node.onResizeDblclick, originalResizeDblclick);
+});
+
+test("vertical manual resizing snaps once on pointer release", async () => {
+	const { Controller, window } = await loadController();
+	const wrapper = window.document.createElement("div");
+	wrapper.className = "canvas-wrapper";
+	window.document.body.append(wrapper);
+	const nodeElement = window.document.createElement("div");
+	nodeElement.className = "canvas-node";
+	Object.defineProperty(nodeElement, "scrollHeight", { configurable: true, value: 120 });
+	Object.defineProperty(nodeElement, "offsetHeight", { configurable: true, value: 120 });
+	Object.defineProperty(nodeElement, "getBoundingClientRect", {
+		configurable: true,
+		value: () => ({ left: 0, top: 0, right: 100, bottom: 152, width: 100, height: 152 }),
+	});
+	wrapper.append(nodeElement);
+	const handle = window.document.createElement("div");
+	handle.className = "canvas-node-resizer";
+	handle.dataset.side = "bottom";
+	wrapper.append(handle);
+
+	let data: any = {
+		nodes: [{ id: "node", x: 0, y: 0, width: 100, height: 152, type: "text", text: "Node" }],
+		edges: [],
+	};
+	const node: any = { ...data.nodes[0], nodeEl: nodeElement };
+	const canvas: any = {
+		wrapperEl: wrapper,
+		nodes: new Map([[node.id, node]]),
+		selection: new Set([node]),
+		getData: () => data,
+		importData: (next: any) => {
+			data = next;
+			node.width = next.nodes[0].width;
+			node.height = next.nodes[0].height;
+		},
+		requestSave: () => undefined,
+		requestFrame: () => undefined,
+		x: 0,
+		y: 0,
+		zoom: 0,
+		scale: 1,
+	};
+	const controller = new Controller({
+		view: { canvas, containerEl: wrapper },
+		state: {
+			version: 1,
+			enabled: true,
+			autoLayout: false,
+			autoHeight: true,
+			defaultLayout: "left-to-right" as const,
+			trees: {},
+			relations: {},
+			collapsedNodeIds: [],
+			manualHeightNodeIds: [],
+		},
+		onStateChange: () => undefined,
+	});
+	controller.mount();
+
+	handle.dispatchEvent(new window.PointerEvent("pointerdown", {
+		bubbles: true,
+		cancelable: true,
+		button: 0,
+		pointerId: 7,
+		clientX: 50,
+		clientY: 152,
+	}));
+	node.height = 220;
+	(controller as any).height.schedule("node");
+	assert.equal(node.height, 220);
+
+	window.dispatchEvent(new window.PointerEvent("pointerup", {
+		bubbles: true,
+		cancelable: true,
+		button: 0,
+		pointerId: 7,
+		clientX: 50,
+		clientY: 220,
+	}));
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	assert.equal(node.height, 152);
+
+	controller.dispose();
+});

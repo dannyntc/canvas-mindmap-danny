@@ -1,5 +1,8 @@
-import { CanvasAdapter } from "./canvas-adapter";
+import { CanvasAdapter, CanvasNodeLike } from "./canvas-adapter";
 import { CanvasMindMapState, NodeId } from "./types";
+
+export const AUTO_SIZE_EXTRA_HEIGHT = 32;
+export const MIN_AUTO_HEIGHT = 60;
 
 export interface HeightControllerOptions {
 	adapter: CanvasAdapter;
@@ -7,11 +10,6 @@ export interface HeightControllerOptions {
 	isEnabled: () => boolean;
 	isExternalResizeOwner?: () => boolean;
 	onResized?: (nodeId: NodeId) => void;
-}
-
-function numberStyle(value: string): number {
-	const parsed = Number.parseFloat(value);
-	return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function measureElement(element: HTMLElement): number | undefined {
@@ -24,12 +22,18 @@ function measureElement(element: HTMLElement): number | undefined {
 		element,
 	].filter((candidate): candidate is HTMLElement => !!candidate);
 	for (const candidate of candidates) {
-		const height = Math.max(candidate.scrollHeight, candidate.offsetHeight);
+		const previousHeight = candidate.style.height;
+		let height = 0;
+		try {
+			candidate.style.height = "1px";
+			height = Math.max(candidate.scrollHeight, candidate.offsetHeight);
+		} finally {
+			candidate.style.height = previousHeight;
+		}
 		if (height <= 0) continue;
-		const style = getComputedStyle(candidate);
-		const padding = numberStyle(style.paddingTop) + numberStyle(style.paddingBottom);
-		const border = numberStyle(style.borderTopWidth) + numberStyle(style.borderBottomWidth);
-		return height + padding + border;
+		// scrollHeight already includes the element's padding. Adding computed
+		// padding again makes the card grow by the same spacing twice.
+		return height;
 	}
 	return undefined;
 }
@@ -41,6 +45,8 @@ export class HeightController {
 	private readonly mutationObservers = new Map<NodeId, MutationObserver>();
 	private readonly inputListeners = new Map<NodeId, { element: HTMLElement; listener: () => void }>();
 	private readonly lastHeights = new Map<NodeId, number>();
+	private readonly explicitFitHeights = new Map<NodeId, number>();
+	private readonly manualResizeNodeIds = new Set<NodeId>();
 	private disposed = false;
 
 	constructor(options: HeightControllerOptions) {
@@ -50,7 +56,7 @@ export class HeightController {
 	refreshAll(): void {
 		if (this.disposed || !this.options.isEnabled()) return;
 		for (const node of this.options.adapter.nodes()) {
-			if (node.type === "text") this.schedule(node.id, true);
+			if (this.isTextNode(node)) this.schedule(node.id, true);
 		}
 	}
 
@@ -66,7 +72,7 @@ export class HeightController {
 	}
 
 	schedule(nodeId: NodeId, immediate = false): void {
-		if (this.disposed || !this.options.isEnabled()) return;
+		if (this.disposed || !this.options.isEnabled() || this.manualResizeNodeIds.has(nodeId)) return;
 		const current = this.timers.get(nodeId);
 		if (current) clearTimeout(current);
 		if (immediate) {
@@ -82,17 +88,27 @@ export class HeightController {
 
 	recalculate(nodeId: NodeId): boolean {
 		if (this.disposed || !this.options.isEnabled()) return false;
+		if (this.manualResizeNodeIds.has(nodeId)) return false;
 		if (this.options.isExternalResizeOwner?.()) return false;
 		const state = this.options.getState();
 		if (state.manualHeightNodeIds.includes(nodeId)) return false;
 		const node = this.options.adapter.node(nodeId);
-		if (!node || node.type !== "text" || !node.nodeEl) return false;
+		if (!node || !this.isTextNode(node) || !node.nodeEl) return false;
 		if (node.nodeEl.classList.contains("canvas-mindmap-hidden")) return false;
 		const measured = measureElement(node.nodeEl);
 		if (measured === undefined) return false;
-		const height = Math.max(60, Math.round(measured / this.options.adapter.zoom()));
-		const previous = this.lastHeights.get(nodeId) ?? node.height;
-		if (Math.abs(height - previous) < 2 || Math.abs(height - node.height) < 2) {
+		// DOM scrollHeight and Canvas node dimensions are both local CSS units;
+		// zoom affects presentation only and must not change saved geometry.
+		const explicitFitHeight = this.explicitFitHeights.get(nodeId);
+		if (explicitFitHeight !== undefined && Math.abs(node.height - explicitFitHeight) >= 2) {
+			this.explicitFitHeights.delete(nodeId);
+		}
+		const height = Math.max(
+			MIN_AUTO_HEIGHT,
+			Math.round(measured + AUTO_SIZE_EXTRA_HEIGHT),
+			this.explicitFitHeights.get(nodeId) ?? 0,
+		);
+		if (Math.abs(height - node.height) < 2) {
 			this.lastHeights.set(nodeId, height);
 			return false;
 		}
@@ -107,7 +123,7 @@ export class HeightController {
 
 	observe(nodeId: NodeId): void {
 		const node = this.options.adapter.node(nodeId);
-		if (!node?.nodeEl || node.type !== "text") return;
+		if (!node?.nodeEl || !this.isTextNode(node)) return;
 		this.observers.get(nodeId)?.disconnect();
 		if (typeof ResizeObserver !== "undefined") {
 			const observer = new ResizeObserver(() => this.schedule(nodeId));
@@ -132,8 +148,12 @@ export class HeightController {
 
 	observeAll(): void {
 		for (const node of this.options.adapter.nodes()) {
-			if (node.type === "text") this.observe(node.id);
+			if (this.isTextNode(node)) this.observe(node.id);
 		}
+	}
+
+	private isTextNode(node: CanvasNodeLike): boolean {
+		return this.options.adapter.isTextNode?.(node) ?? node.type === "text";
 	}
 
 	setManualHeight(nodeId: NodeId, manual: boolean): void {
@@ -142,9 +162,28 @@ export class HeightController {
 		if (manual) state.manualHeightNodeIds.push(nodeId);
 	}
 
+	setExplicitFitHeight(nodeId: NodeId, height: number): void {
+		this.explicitFitHeights.set(nodeId, Math.round(height));
+		this.lastHeights.set(nodeId, Math.round(height));
+	}
+
+	beginManualResize(nodeId: NodeId): void {
+		this.manualResizeNodeIds.add(nodeId);
+		const timer = this.timers.get(nodeId);
+		if (timer) clearTimeout(timer);
+		this.timers.delete(nodeId);
+	}
+
+	endManualResize(nodeId: NodeId): void {
+		if (!this.manualResizeNodeIds.delete(nodeId)) return;
+		this.schedule(nodeId, true);
+	}
+
 	dispose(): void {
 		this.disposed = true;
 		this.pause();
 		this.lastHeights.clear();
+		this.explicitFitHeights.clear();
+		this.manualResizeNodeIds.clear();
 	}
 }

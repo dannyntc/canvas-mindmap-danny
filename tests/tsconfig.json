@@ -10,6 +10,7 @@
   },
   "include": [
     "../src/types.ts",
+		"../src/height-controller.ts",
     "../src/tree-model.ts",
     "../src/layout.ts",
 	    "../src/space-making.ts",

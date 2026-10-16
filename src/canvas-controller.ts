@@ -4,11 +4,13 @@ import {
 	CanvasLike,
 	CanvasNodeLike,
 	CanvasViewport,
+	NativeResizeDblclickHook,
+	ResizeSide,
 } from "./canvas-adapter";
 import { applyCanvasColors, branchColorTargets } from "./color-actions";
 import { PASTEL_COLORS } from "./colors";
 import { ColorApplyResult, ColorPaletteHandle, openColorPalette } from "./color-palette";
-import { HeightController } from "./height-controller";
+import { AUTO_SIZE_EXTRA_HEIGHT, HeightController } from "./height-controller";
 import { NativeColorPickerHandle, enhanceNativeColorPicker } from "./native-color-picker";
 import {
 	findContactParent,
@@ -122,6 +124,13 @@ interface PanSnapshot {
 	frame?: number;
 }
 
+interface ManualResizeSnapshot {
+	nodeId: NodeId;
+	pointerId: number;
+	side: "top" | "bottom";
+	frame?: number;
+}
+
 interface HistoryBaseline {
 	beforeData: CanvasData;
 	beforeState: CanvasMindMapState;
@@ -158,6 +167,8 @@ function isDomElement(target: EventTarget | null): target is Element {
 	return !!target && typeof (target as Element).closest === "function";
 }
 
+const RESIZE_HANDLE_SELECTOR = ".canvas-node-resizer, .canvas-node-resize, [data-resize-handle]";
+
 function center(node: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
 	return { x: node.x + node.width / 2, y: node.y + node.height / 2 };
 }
@@ -177,6 +188,7 @@ export class CanvasController {
 	private disposed = false;
 	private drag?: DragSnapshot;
 	private pan?: PanSnapshot;
+	private resize?: ManualResizeSnapshot;
 	private panNoticeShown = false;
 	private readonly zoomControlStates = new WeakMap<HTMLElement, { ariaHidden: string | null; tabIndex: string | null }>();
 	private arrangeControl?: HTMLElement;
@@ -185,8 +197,10 @@ export class CanvasController {
 	private readonly height: HeightController;
 	private colorPalette?: ColorPaletteHandle;
 	private readonly nativeColorPickers = new Map<HTMLElement, NativeColorPickerHandle>();
+	private readonly lastNativeFitSizes = new Map<string, { width: number; height: number }>();
 	private removeNativeDragHook?: () => void;
 	private removeDataImportHook?: () => void;
+	private nativeResizeDblclickHook?: NativeResizeDblclickHook;
 	private historySyncTimer?: number;
 	private lastCanvasStructureKey?: string;
 	private layoutOutcome: LayoutOutcome = "unchanged";
@@ -221,9 +235,13 @@ export class CanvasController {
 			onCancel: (event) => this.onNativeDragCancel(event),
 		});
 		this.lastCanvasStructureKey = this.canvasStructureKey(this.adapter.getData());
-		this.removeDataImportHook = this.adapter.observeDataImport((data) => this.scheduleHistorySync(data));
+		this.removeDataImportHook = this.adapter.observeDataImport((data) => this.onCanvasDataImport(data));
+		this.nativeResizeDblclickHook = this.adapter.observeResizeDblclick((node, event, side) => {
+			this.onNativeResizeDblclick(node, event, side);
+		});
 		this.keyTarget.addEventListener("keydown", this.onKeyDown, true);
 		this.keyTarget.addEventListener("pointerdown", this.onPointerDown, true);
+		this.win.addEventListener("pointerdown", this.onResizePointerDown, true);
 		this.win.addEventListener("pointermove", this.onPointerMove, true);
 		this.win.addEventListener("pointerup", this.onPointerUp, true);
 		this.win.addEventListener("pointercancel", this.onPointerCancel, true);
@@ -250,6 +268,7 @@ export class CanvasController {
 				if (!this.domObserver || this.disposed || !this.state.enabled) return;
 				this.domObserver.disconnect();
 				this.reconcileStateWithCanvas();
+				this.nativeResizeDblclickHook?.refresh();
 				this.updateZoomControls();
 				this.applyVisibility();
 				this.refreshControls();
@@ -446,6 +465,7 @@ export class CanvasController {
 			this.removeControls();
 			return;
 		}
+		this.nativeResizeDblclickHook?.refresh();
 		if (!this.adapter.capabilities.available) {
 			this.notify(`Mind-map mode is unavailable: ${this.adapter.capabilities.missing.join(", ")}.`);
 			return;
@@ -1035,7 +1055,15 @@ export class CanvasController {
 		this.applyVisibility();
 		this.refreshControls();
 		this.adapter.selectOnly(nodeId);
-		this.win.setTimeout(() => this.adapter.startEditing(nodeId), 0);
+		this.height.observe(nodeId);
+		this.nativeResizeDblclickHook?.refresh();
+		this.win.setTimeout(() => {
+			if (this.disposed) return;
+			this.height.observe(nodeId);
+			this.nativeResizeDblclickHook?.refresh();
+			this.height.schedule(nodeId, true);
+			this.adapter.startEditing(nodeId);
+		}, 0);
 	}
 
 	startEditingSelected(): boolean {
@@ -1679,7 +1707,7 @@ export class CanvasController {
 		const selectedBeforePress = this.adapter.selectionIds();
 		if (!event.shiftKey && !selectedBeforePress.includes(nodeId)) this.adapter.selectOnly(nodeId);
 		if (this.adapter.capabilities.readOnly) return;
-		if (event.target.closest(".canvas-node-resizer, .canvas-node-resize, [data-resize-handle]")) {
+		if (event.target.closest(RESIZE_HANDLE_SELECTOR)) {
 			if (!this.state.manualHeightNodeIds.includes(nodeId)) {
 				this.state.manualHeightNodeIds.push(nodeId);
 				this.commitState();
@@ -1741,9 +1769,7 @@ export class CanvasController {
 		}
 		if (!stopped) return;
 		const nodeId = this.nodeIdFromElement(target);
-		const isResizeHandle = !!target.closest(
-			".canvas-node-resizer, .canvas-node-resize, [data-resize-handle]",
-		);
+		const isResizeHandle = !!target.closest(RESIZE_HANDLE_SELECTOR);
 		if (!isEditableTarget(target) && (!nodeId || !isResizeHandle)) this.adapter.focusCanvas();
 	}
 
@@ -1774,6 +1800,87 @@ export class CanvasController {
 		this.restoreDraggedBranch(drag);
 		this.clearContactState(drag);
 		this.drag = undefined;
+	}
+
+	private onCanvasDataImport(data: CanvasData): void {
+		this.scheduleHistorySync(data);
+	}
+
+	private onResizePointerDown = (event: PointerEvent): void => {
+		if (!this.state.enabled || this.disposed || event.button !== 0 || this.resize) return;
+		if (!isDomElement(event.target)) return;
+		const handle = event.target.closest<HTMLElement>(RESIZE_HANDLE_SELECTOR);
+		if (!handle) return;
+		const selected = this.adapter.selectionIds();
+		const nodeId = this.nodeIdFromElement(handle) ?? (selected.length === 1 ? selected[0] : undefined);
+		if (!nodeId || !this.adapter.node(nodeId)) return;
+		const side = this.resizeSide(handle, nodeId, event);
+		if (side !== "top" && side !== "bottom") return;
+		if (!this.state.autoHeight || this.options.isExternalResizeOwner?.()) return;
+		this.resize = { nodeId, pointerId: event.pointerId, side };
+		this.height.beginManualResize(nodeId);
+	};
+
+	private resizeSide(handle: HTMLElement, nodeId: NodeId, event: PointerEvent): ResizeSide | undefined {
+		const semanticText = [
+			handle.dataset.side,
+			handle.dataset.direction,
+			handle.getAttribute("aria-label"),
+			handle.getAttribute("title"),
+			handle.className,
+		].filter(Boolean).join(" ").toLowerCase();
+		const explicitSide = semanticText.match(/(?:^|[\s_-])(top|right|bottom|left)(?:[\s_-]|$)/)?.[1] as ResizeSide | undefined;
+		if (explicitSide) return explicitSide;
+
+		const node = this.adapter.node(nodeId);
+		const bounds = node?.nodeEl?.getBoundingClientRect();
+		if (!bounds || bounds.width <= 0 || bounds.height <= 0) return undefined;
+		const distances: Array<{ side: ResizeSide; distance: number }> = [
+			{ side: "top", distance: Math.abs(event.clientY - bounds.top) },
+			{ side: "right", distance: Math.abs(event.clientX - bounds.right) },
+			{ side: "bottom", distance: Math.abs(event.clientY - bounds.bottom) },
+			{ side: "left", distance: Math.abs(event.clientX - bounds.left) },
+		];
+		distances.sort((first, second) => first.distance - second.distance);
+		return distances[0]?.side;
+	}
+
+	private onNativeResizeDblclick(node: CanvasNodeLike, _event: MouseEvent, side: ResizeSide): void {
+		if (!this.state.enabled || this.disposed || this.adapter.capabilities.readOnly) return;
+		if (side !== "right" && side !== "bottom") return;
+		if (!this.adapter.isTextNode(node) || !node.nodeEl || this.options.isExternalResizeOwner?.()) return;
+		if (!this.hasVisiblePreview(node)) return;
+		const fitKey = `${node.id}:${side}`;
+		const lastFit = this.lastNativeFitSizes.get(fitKey);
+		if (lastFit && Math.abs(lastFit.width - node.width) < 1 && Math.abs(lastFit.height - node.height) < 1) return;
+		const width = side === "right" ? node.width + 48 : node.width;
+		const height = side === "bottom" ? node.height + AUTO_SIZE_EXTRA_HEIGHT : node.height;
+		if (width === node.width && height === node.height) {
+			if (side === "bottom") this.height.setExplicitFitHeight(node.id, height);
+			return;
+		}
+		if (this.adapter.resizeNode(node.id, width, height)) {
+			if (side === "bottom") this.height.setExplicitFitHeight(node.id, height);
+			this.lastNativeFitSizes.set(fitKey, { width, height });
+			this.adapter.requestFrame();
+			this.adapter.requestSave();
+		}
+	}
+
+	private hasVisiblePreview(node: CanvasNodeLike): boolean {
+		const nodeElement = node.nodeEl;
+		if (!nodeElement) return false;
+		if (nodeElement.classList.contains("canvas-mindmap-hidden")) return false;
+		const nativePreview = (node as unknown as {
+			child?: { previewMode?: { renderer?: { previewEl?: { isShown?: () => boolean } } } };
+		}).child?.previewMode?.renderer?.previewEl;
+		if (nativePreview && typeof nativePreview.isShown === "function") return nativePreview.isShown();
+		const preview = nodeElement.querySelector<HTMLElement>(
+			".markdown-preview-view, .markdown-preview-sizer, .markdown-rendered",
+		);
+		if (!preview) return false;
+		const style = this.win.getComputedStyle(preview);
+		return style.display !== "none" && style.visibility !== "hidden";
 	}
 
 	private onPointerMove = (event: PointerEvent): void => {
@@ -1813,6 +1920,10 @@ export class CanvasController {
 			this.flushPanFrame();
 			this.cancelPan();
 			event.preventDefault();
+			return;
+		}
+		if (this.resize?.pointerId === event.pointerId) {
+			this.finishResize();
 			return;
 		}
 		if (this.drag?.nativeLifecycle) return;
@@ -1860,6 +1971,7 @@ export class CanvasController {
 
 	private onPointerCancel = (event: PointerEvent): void => {
 		if (this.pan?.pointerId === event.pointerId) this.cancelPan();
+		if (this.resize?.pointerId === event.pointerId) this.finishResize();
 		if (this.drag?.pointerId === event.pointerId) {
 			const drag = this.drag;
 			if (drag.frame !== undefined) this.win.cancelAnimationFrame(drag.frame);
@@ -2137,10 +2249,22 @@ export class CanvasController {
 
 	private cancelPointerInteraction(): void {
 		this.cancelPan();
+		this.finishResize();
 		if (this.drag?.frame !== undefined) this.win.cancelAnimationFrame(this.drag.frame);
 		if (this.drag) this.restoreDraggedBranch(this.drag);
 		if (this.drag) this.clearContactState(this.drag);
 		this.drag = undefined;
+	}
+
+	private finishResize(): void {
+		const resize = this.resize;
+		if (!resize) return;
+		this.resize = undefined;
+		if (resize.frame !== undefined) this.win.cancelAnimationFrame(resize.frame);
+		resize.frame = this.win.requestAnimationFrame(() => {
+			if (this.disposed) return;
+			this.height.endManualResize(resize.nodeId);
+		});
 	}
 
 	private isCanvasBackground(element: Element): boolean {
@@ -2210,7 +2334,8 @@ export class CanvasController {
 				{ label: "Branch arrow colours", nodeIds: new Set(), edgeIds: branchTargets.edgeIds },
 			));
 		});
-		if (this.adapter.node(nodeId)?.type === "text") {
+		const selectedNode = this.adapter.node(nodeId);
+		if (selectedNode && this.adapter.isTextNode(selectedNode)) {
 			menu.addItem((item: any) => item.setTitle("Toggle automatic height").setIcon("move-vertical").onClick(() => {
 				const manual = !this.state.manualHeightNodeIds.includes(nodeId);
 				this.state.manualHeightNodeIds = this.state.manualHeightNodeIds.filter((id) => id !== nodeId);
@@ -2239,6 +2364,8 @@ export class CanvasController {
 		this.cancelPointerInteraction();
 		this.removeNativeDragHook?.();
 		this.removeNativeDragHook = undefined;
+		this.nativeResizeDblclickHook?.dispose();
+		this.nativeResizeDblclickHook = undefined;
 		this.removeDataImportHook?.();
 		this.removeDataImportHook = undefined;
 		this.revealAll();
@@ -2246,8 +2373,10 @@ export class CanvasController {
 		this.removeArrangeControl();
 		this.restoreZoomControls(this.canvasHostRoots());
 		this.height.dispose();
+		this.lastNativeFitSizes.clear();
 		this.keyTarget?.removeEventListener("keydown", this.onKeyDown, true);
 		this.keyTarget?.removeEventListener("pointerdown", this.onPointerDown, true);
+		this.win.removeEventListener("pointerdown", this.onResizePointerDown, true);
 		this.win.removeEventListener("pointermove", this.onPointerMove, true);
 		this.win.removeEventListener("pointerup", this.onPointerUp, true);
 		this.win.removeEventListener("pointercancel", this.onPointerCancel, true);
