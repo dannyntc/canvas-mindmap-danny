@@ -36,6 +36,17 @@
     display: none !important;
 }
 
+.canvas-node-content,
+.canvas-node-content .markdown-preview-view,
+.canvas-node-content .markdown-preview-sizer,
+.canvas-node-content .markdown-rendered,
+.canvas-node-content .markdown-source-view,
+.canvas-node-content .cm-content,
+.canvas-node-content textarea,
+.canvas-node-content [contenteditable="true"] {
+    text-align: justify !important;
+}
+
 .canvas-mindmap-arrange-control:focus-visible {
     outline: 2px solid var(--interactive-accent);
     outline-offset: -2px;
